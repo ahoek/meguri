@@ -4,33 +4,42 @@ import {
   locateOnRoute,
   locateInitial,
   nextManeuver,
-  bearingBetween,
+  routeBearingAt,
 } from './navigation.js'
 import { speakManeuver, resetSpeech } from './speech.js'
-import { findSpots, upcomingSpot } from './spots.js'
 import { routeBetween } from './route.js'
 import { distanceKm } from './geo.js'
-import { locale } from '../i18n.js'
 
-const OFF_ROUTE_M = 40
 const ARRIVE_M = 25
+
+// Consumer GPS wanders by tens of metres between buildings, so a single bad
+// fix must not move you to the next street. Going off route has to be both
+// far enough and sustained.
+const OFF_ROUTE_M = 45
+const OFF_ROUTE_FIXES = 3
+const BACK_ON_ROUTE_M = 30
+
+// Nothing plausible happens faster than this, whatever the GPS claims.
+const MAX_SPEED_KMH = { walk: 12, bike: 45 }
+const DEFAULT_PACE_KMH = { walk: 4.8, bike: 16 }
+const PACE_SMOOTHING = 0.12 // exponential moving average weight per fix
 
 export const nav = reactive({
   active: false,
   ready: false, // a GPS fix has arrived
   position: null, // [lng, lat] raw GPS
-  snapped: null, // [lng, lat] projected onto the route
-  heading: null, // degrees, course over ground
+  snapped: null, // [lng, lat] projected onto the route — what we display
+  heading: null, // degrees; the route's direction while we're on it
   accuracy: null,
   alongKm: 0,
   remainingKm: 0,
   remainingSec: 0,
+  paceKmh: 0, // smoothed, for dead reckoning between fixes
+  fixAt: 0, // performance.now() of the last accepted fix
   maneuver: null, // { kind, distanceM, exit }
   offRoute: false,
   arrived: false,
   voice: localStorage.getItem('meguri-voice') !== 'off',
-  spots: [], // interesting places along the route
-  spot: null, // the one you're passing right now
   rejoin: null, // { coordinates, distanceKm } path back after a wrong turn
   rejoining: false,
 })
@@ -39,12 +48,16 @@ let prepared = null
 let watchId = null
 let wakeLock = null
 let lastIndex = 0
-let paceKmh = 5
+let alongKm = 0
 let maxAlongKm = 0
+let paceKmh = DEFAULT_PACE_KMH.walk
+let lastFixAt = 0
+let lastAcceptedAt = 0
+let doubts = 0
+let strayFixes = 0
 let haveFirstFix = false
-let spotsAbort = null
 let rejoinAbort = null
-let rejoinFrom = null // position the current rejoin path was computed from
+let rejoinFrom = null
 let profileMode = 'walk'
 let natureOn = true
 
@@ -78,55 +91,119 @@ function onVisibility() {
   }
 }
 
+/** Update the running pace estimate from this fix, ignoring noise. */
+function updatePace(gpsSpeed, advancedKm, dtSec) {
+  const ceiling = MAX_SPEED_KMH[profileMode]
+  let sample = null
+
+  if (typeof gpsSpeed === 'number' && gpsSpeed > 0.6) {
+    sample = gpsSpeed * 3.6
+  } else if (dtSec > 2 && advancedKm > 0.002) {
+    // No speed from the device — derive it from progress along the route.
+    sample = (advancedKm / dtSec) * 3600
+  }
+
+  if (sample == null) return
+  if (sample > ceiling) return // a GPS spike, not a person
+
+  // Smoothed, so the arrival time doesn't jump every second.
+  paceKmh = paceKmh + (sample - paceKmh) * PACE_SMOOTHING
+  paceKmh = Math.min(Math.max(paceKmh, 1.5), ceiling)
+}
+
+// Give up doubting after this many fixes in a row: if the GPS keeps insisting,
+// it is right and our idea of where we are is stale.
+const MAX_DOUBTS = 3
+
+/**
+ * Reject progress that no walker or cyclist could have made. Without this a
+ * stray reading near the far side of the loop can jump you to the end of the
+ * route — including announcing arrival at the start, where the finish sits on
+ * top of you.
+ *
+ * The allowance grows with the time since the last *accepted* fix, not the
+ * last fix of any kind. Otherwise a single rejection freezes progress: the
+ * budget never widens, so every later fix looks like an impossible leap and
+ * navigation silently stops following you.
+ */
+function plausible(candidateKm, nowMs) {
+  if (!haveFirstFix) return true
+  if (doubts >= MAX_DOUBTS) return true
+
+  const ceiling = MAX_SPEED_KMH[profileMode]
+  const stuckSec = Math.max((nowMs - lastAcceptedAt) / 1000, 1)
+  const allowanceKm = (ceiling / 3600) * stuckSec + 0.03
+  const delta = candidateKm - alongKm
+  if (delta > allowanceKm) return false
+  // Small backward corrections are normal; a big one is a bad fix.
+  if (delta < -Math.max(allowanceKm, 0.05)) return false
+  return true
+}
+
 function onPosition(pos) {
   const { longitude, latitude, heading, speed, accuracy } = pos.coords
   const position = [longitude, latitude]
+  const now = pos.timestamp || Date.now()
+  const dtSec = lastFixAt ? Math.max((now - lastFixAt) / 1000, 0.5) : 1
 
   nav.ready = true
   nav.position = position
   nav.accuracy = accuracy
-  if (typeof speed === 'number' && speed > 0.5) {
-    paceKmh = speed * 3.6
-  }
 
-  // The first fix decides where on the loop we are; later ones follow on.
   const fix = haveFirstFix
     ? locateOnRoute(prepared, position, lastIndex)
     : locateInitial(prepared, position)
-  haveFirstFix = true
-  lastIndex = fix.index
-  maxAlongKm = Math.max(maxAlongKm, fix.alongKm)
 
-  nav.snapped = fix.snapped
-  nav.alongKm = fix.alongKm
-  nav.offRoute = fix.offRouteM > OFF_ROUTE_M
-  nav.remainingKm = Math.max(0, prepared.totalKm - fix.alongKm)
-  nav.remainingSec = (nav.remainingKm / Math.max(paceKmh, 1)) * 3600
-
-  // A device heading is often absent when standing still; fall back to the
-  // direction the route itself runs, so the map still orients sensibly.
-  if (typeof heading === 'number' && !Number.isNaN(heading)) {
-    nav.heading = heading
+  const accepted = plausible(fix.alongKm, now)
+  if (accepted) {
+    const advanced = Math.max(0, fix.alongKm - alongKm)
+    updatePace(speed, advanced, dtSec)
+    lastIndex = fix.index
+    alongKm = fix.alongKm
+    maxAlongKm = Math.max(maxAlongKm, alongKm)
+    nav.snapped = fix.snapped
+    lastAcceptedAt = now
+    doubts = 0
   } else {
-    const ahead = prepared.coords[Math.min(fix.index + 1, prepared.coords.length - 1)]
-    nav.heading = bearingBetween(fix.snapped, ahead)
+    // Keep the last believable position rather than teleporting.
+    doubts += 1
+    updatePace(speed, 0, dtSec)
   }
 
-  const maneuver = nav.offRoute ? null : nextManeuver(prepared, fix.alongKm)
+  if (!haveFirstFix) lastAcceptedAt = now
+  haveFirstFix = true
+  lastFixAt = now
+
+  // Off-route has to persist before we believe it, and clear decisively.
+  if (fix.offRouteM > OFF_ROUTE_M) strayFixes += 1
+  else if (fix.offRouteM < BACK_ON_ROUTE_M) strayFixes = 0
+  nav.offRoute = strayFixes >= OFF_ROUTE_FIXES
+
+  nav.alongKm = alongKm
+  nav.paceKmh = paceKmh
+  nav.fixAt = performance.now()
+  nav.remainingKm = Math.max(0, prepared.totalKm - alongKm)
+  nav.remainingSec = (nav.remainingKm / paceKmh) * 3600
+
+  // Point the way the route runs, not the way the GPS thinks you're facing:
+  // course over ground is wild at walking pace and jitters on a bike.
+  nav.heading = nav.offRoute
+    ? (typeof heading === 'number' && !Number.isNaN(heading)
+        ? heading
+        : nav.heading)
+    : routeBearingAt(prepared, lastIndex)
+
+  const maneuver = nav.offRoute ? null : nextManeuver(prepared, alongKm)
   nav.maneuver = maneuver
 
-  // The finish is also the start, so arriving requires having actually gone
-  // round: most of the loop covered, and now back at the end of it.
-  const toFinishM = (prepared.totalKm - fix.alongKm) * 1000
+  // The finish is also the start, so arriving requires having gone round.
+  const toFinishM = (prepared.totalKm - alongKm) * 1000
   const wentRound = maxAlongKm > prepared.totalKm * 0.7
   nav.arrived = wentRound && toFinishM < ARRIVE_M
-
-  nav.spot = nav.offRoute ? null : upcomingSpot(nav.spots, fix.alongKm)
 
   if (nav.offRoute) {
     maybeRejoin(position, fix)
   } else if (nav.rejoin) {
-    // Back on the line — drop the detour guidance.
     rejoinAbort?.abort()
     rejoinFrom = null
     nav.rejoin = null
@@ -172,23 +249,10 @@ async function maybeRejoin(position, fix) {
       distanceKm: path.distanceKm,
     }
   } catch {
-    /* offline or unroutable — the arrow back to the line still shows */
+    /* offline or unroutable — the warning still shows */
   } finally {
     nav.rejoining = false
   }
-}
-
-/** Look up nearby points of interest; failures are silently ignored. */
-export async function loadSpots(route) {
-  spotsAbort?.abort()
-  spotsAbort = new AbortController()
-  const forRoute = prepareRoute(route)
-  const found = await findSpots(forRoute, {
-    signal: spotsAbort.signal,
-    lang: locale.value,
-  })
-  nav.spots = found
-  return found
 }
 
 function onPositionError() {
@@ -202,14 +266,18 @@ export function startNavigation(route, { mode = 'walk', nature = true } = {}) {
   natureOn = nature
   prepared = prepareRoute(route)
   lastIndex = 0
+  alongKm = 0
   maxAlongKm = 0
+  paceKmh = DEFAULT_PACE_KMH[mode] ?? DEFAULT_PACE_KMH.walk
+  lastFixAt = 0
+  lastAcceptedAt = 0
+  doubts = 0
+  strayFixes = 0
   haveFirstFix = false
-  paceKmh = 5
   resetSpeech()
 
   rejoinFrom = null
   Object.assign(nav, {
-    spot: null,
     rejoin: null,
     rejoining: false,
     active: true,
@@ -219,8 +287,10 @@ export function startNavigation(route, { mode = 'walk', nature = true } = {}) {
     heading: null,
     accuracy: null,
     alongKm: 0,
+    paceKmh,
+    fixAt: 0,
     remainingKm: prepared.totalKm,
-    remainingSec: route.durationSec,
+    remainingSec: (prepared.totalKm / paceKmh) * 3600,
     maneuver: null,
     offRoute: false,
     arrived: false,
@@ -246,7 +316,7 @@ export function stopNavigation() {
   nav.active = false
   nav.maneuver = null
   nav.position = null
-  nav.spot = null
+  nav.snapped = null
   nav.rejoin = null
   rejoinAbort?.abort()
   rejoinFrom = null

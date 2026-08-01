@@ -88,8 +88,18 @@ const TIE_M = 20 // candidates this close to the best are treated as equal
  * which reads as "you have already gone all the way round". Among all
  * near-equal candidates, take the earliest one.
  */
+const AT_START_M = 90
+
 export function locateInitial(prepared, position) {
   const { coords, cumulative } = prepared
+
+  // Navigation starts where the loop starts. If we're anywhere near that
+  // point, we are at the beginning of the route — not at the end of it,
+  // which sits on exactly the same spot.
+  if (distanceKm(position, coords[0]) * 1000 < AT_START_M) {
+    return { index: 0, snapped: coords[0], alongKm: 0, offRouteM: 0 }
+  }
+
   let best = null
 
   for (let i = 0; i < coords.length - 1; i++) {
@@ -177,6 +187,44 @@ function projectOnSegment(a, b, p) {
   return {
     point: [(ax + t * dx) / k, ay + t * dy],
     t,
+  }
+}
+
+/**
+ * Which way the route runs at `index`, averaged over a short span ahead so a
+ * single kinked vertex doesn't spin the arrow.
+ */
+export function routeBearingAt(prepared, index) {
+  const { coords } = prepared
+  const from = coords[Math.max(0, Math.min(index, coords.length - 2))]
+  const to = coords[Math.min(index + 4, coords.length - 1)]
+  return bearingBetween(from, to)
+}
+
+/**
+ * The point `km` along the route, interpolated within its segment. Used to
+ * carry the display forward between GPS fixes.
+ */
+export function positionAtKm(prepared, km) {
+  const { coords, cumulative, totalKm } = prepared
+  const target = Math.max(0, Math.min(km, totalKm))
+
+  let lo = 0
+  let hi = cumulative.length - 1
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1
+    if (cumulative[mid] <= target) lo = mid
+    else hi = mid
+  }
+
+  const span = cumulative[hi] - cumulative[lo]
+  const f = span > 0 ? (target - cumulative[lo]) / span : 0
+  const a = coords[lo]
+  const b = coords[hi]
+  return {
+    position: [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f],
+    index: lo,
+    bearing: routeBearingAt(prepared, lo),
   }
 }
 

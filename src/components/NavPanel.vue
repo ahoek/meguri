@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { nav, stopNavigation, setVoice } from '../lib/nav-session.js'
+import { primeSpeech } from '../lib/speech.js'
 import { locale, t } from '../i18n.js'
 
 const emit = defineEmits(['recenter'])
@@ -73,6 +74,12 @@ const arrivalClock = computed(() => {
   })
 })
 
+function onVoiceToggle() {
+  // Turning voice on is a gesture — use it to unlock iOS speech.
+  if (!nav.voice) primeSpeech()
+  setVoice(!nav.voice)
+}
+
 const progress = computed(() => {
   const total = nav.alongKm + nav.remainingKm
   return total ? Math.min(100, (nav.alongKm / total) * 100) : 0
@@ -125,15 +132,6 @@ const progress = computed(() => {
     </div>
 
     <div class="bottom">
-    <!-- Passing something worth a look -->
-    <Transition name="spot">
-      <div v-if="nav.spot && !nav.arrived" class="spot-card">
-        <span class="spot-kind">{{ t(`spot_${nav.spot.kind}`) }}</span>
-        <span class="spot-name">{{ nav.spot.name }}</span>
-        <span class="spot-dist">{{ formatDistance(nav.spot.distanceM) }}</span>
-      </div>
-    </Transition>
-
     <!-- Bottom bar -->
     <div class="dash">
       <div class="progress" role="presentation">
@@ -155,7 +153,7 @@ const progress = computed(() => {
             :aria-label="t('navVoice')"
             :aria-pressed="nav.voice"
             :title="t('navVoice')"
-            @click="setVoice(!nav.voice)"
+            @click="onVoiceToggle"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="currentColor" />
@@ -204,58 +202,6 @@ const progress = computed(() => {
   display: flex;
   flex-direction: column;
   pointer-events: none;
-}
-
-/* ---- passing point of interest ---- */
-.spot-card {
-  align-self: center;
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-  max-width: min(90vw, 440px);
-  margin-bottom: 10px;
-  padding: 9px 15px;
-  border-radius: 999px;
-  background: var(--surface);
-  backdrop-filter: blur(18px) saturate(1.6);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
-  border: 1px solid var(--hairline);
-  box-shadow: var(--shadow);
-}
-
-.spot-kind {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--accent-1);
-}
-
-.spot-name {
-  font-size: 14px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spot-dist {
-  flex: none;
-  font-size: 12.5px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.spot-enter-active,
-.spot-leave-active {
-  transition: opacity 0.35s, transform 0.35s;
-}
-
-.spot-enter-from,
-.spot-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
 }
 
 /* ---- instruction banner ---- */

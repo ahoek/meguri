@@ -3,7 +3,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { store, setStart } from '../store.js'
 import { nav, preparedRoute, currentIndex } from '../lib/nav-session.js'
-import { traveledLine } from '../lib/navigation.js'
+import { traveledLine, positionAtKm } from '../lib/navigation.js'
 import { t } from '../i18n.js'
 
 const container = ref(null)
@@ -12,7 +12,6 @@ let marker = null
 let animationFrame = 0
 let resizeObserver = null
 let puck = null
-let spotMarkers = []
 let followCamera = true
 let userMovedAt = 0
 
@@ -22,7 +21,8 @@ defineExpose({
   recenter() {
     followCamera = true
     userMovedAt = 0
-    if (nav.position) cameraFollow(true)
+    framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55 }
+    startFollowing(true)
   },
 })
 
@@ -113,49 +113,6 @@ function drawRoute(route) {
   animationFrame = requestAnimationFrame(step)
 }
 
-const SPOT_GLYPH = {
-  viewpoint: 'M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
-  artwork: 'M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-1.8 0-1.6-1.4-1.7-1.4-2.9 0-.8.7-1.3 1.6-1.3H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7Z',
-  water: 'M12 3s6 6.4 6 10.2A6 6 0 0 1 6 13.2C6 9.4 12 3 12 3Z',
-  nature: 'm12 3 7 12H5l7-12Z M12 15v6',
-  park: 'M12 3a6 6 0 0 0-2 11.7V21h4v-6.3A6 6 0 0 0 12 3Z',
-  picnic: 'M4 20 12 5l8 15M7.5 14h9',
-  heritage: 'M4 21h16M6 21V9l6-5 6 5v12M10 21v-6h4v6',
-  windmill: 'M12 22V12m0 0 7-3m-7 3L5 9m7 3 3 7m-3-7-3-7',
-}
-
-function renderSpots() {
-  spotMarkers.forEach((m) => m.remove())
-  spotMarkers = []
-  if (!nav.spots.length) return
-
-  for (const spot of nav.spots) {
-    const el = document.createElement('button')
-    el.type = 'button'
-    el.className = 'spot-pin'
-    el.setAttribute('aria-label', spot.name)
-    // Markers live inside the canvas container, so without this the click
-    // also reaches the map and relocates the start, wiping the route.
-    el.addEventListener('click', (e) => e.stopPropagation())
-    el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${
-      SPOT_GLYPH[spot.kind] ?? SPOT_GLYPH.heritage
-    }" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-
-    const popup = new maplibregl.Popup({
-      offset: 16,
-      closeButton: false,
-      className: 'spot-popup',
-    }).setText(spot.name)
-
-    spotMarkers.push(
-      new maplibregl.Marker({ element: el })
-        .setLngLat(spot.lngLat)
-        .setPopup(popup)
-        .addTo(map),
-    )
-  }
-}
-
 // Driving infrastructure is clutter on foot or on a bike: it competes with
 // the route line and none of it is somewhere you're going.
 const CAR_POI_CLASSES = [
@@ -224,7 +181,9 @@ function removeExtrusions() {
   }
 }
 
-function ensurePuck(lngLat) {
+let puckAngle = null
+
+function ensurePuck(lngLat, bearing) {
   if (!puck) {
     const el = document.createElement('div')
     el.className = 'nav-puck'
@@ -235,26 +194,111 @@ function ensurePuck(lngLat) {
   } else {
     puck.setLngLat(lngLat)
   }
-  const arrow = puck.getElement().firstElementChild
-  if (nav.heading != null) {
-    arrow.style.rotate = `${nav.heading}deg`
-  }
+  if (bearing == null) return
+
+  // Unwrap the angle so turning past north rotates the short way round
+  // instead of spinning 359 degrees the other way.
+  puckAngle =
+    puckAngle == null ? bearing : puckAngle + shortestTurn(puckAngle, bearing)
+  puck.getElement().firstElementChild.style.rotate = `${puckAngle}deg`
 }
 
 // Walking needs to see the next side street; cycling covers ground faster
 // and wants a little more look-ahead.
 const NAV_ZOOM = { walk: 19, bike: 18.2 }
 
+// Phones deliver a fix every one to several seconds. Easing to each arrival
+// stalls between them and then lurches, which is what made following feel
+// jerky — worst on a bike. Because we know the road ahead, we instead carry
+// the position forward along the route at the current pace and let each new
+// fix gently correct it.
+const FOLLOW_EASE = 0.12 // fraction of the remaining gap closed per frame
+const MAX_DEAD_RECKON_S = 8 // stop guessing if the GPS has really gone quiet
+const cam = { lng: 0, lat: 0, bearing: 0, valid: false }
+let followFrame = 0
+// The per-frame jumpTo would cancel any easeTo, so the navigation framing has
+// to be eased inside the same loop. Once it has settled we stop touching zoom
+// and pitch, leaving you free to pinch.
+let framing = null
+
+function shortestTurn(from, to) {
+  return ((((to - from) % 360) + 540) % 360) - 180
+}
+
+/** Where we believe we are right now, between fixes. */
+function projectedNow() {
+  const prepared = preparedRoute()
+  if (!prepared) return null
+
+  if (nav.offRoute || !nav.fixAt) {
+    const raw = nav.snapped ?? nav.position
+    return raw ? { position: raw, bearing: nav.heading } : null
+  }
+
+  const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, MAX_DEAD_RECKON_S)
+  const ahead = (nav.paceKmh / 3600) * elapsed
+  const { position, bearing } = positionAtKm(prepared, nav.alongKm + ahead)
+  return { position, bearing }
+}
+
+function followTick() {
+  followFrame = requestAnimationFrame(followTick)
+  if (!nav.active) return
+
+  const projected = projectedNow()
+  if (!projected) return
+
+  // The puck rides the projection too, so it glides rather than hopping.
+  ensurePuck(projected.position, projected.bearing)
+
+  if (!followCamera) return
+
+  if (!cam.valid) {
+    cam.lng = projected.position[0]
+    cam.lat = projected.position[1]
+    cam.bearing = projected.bearing ?? map.getBearing()
+    cam.valid = true
+  }
+
+  cam.lng += (projected.position[0] - cam.lng) * FOLLOW_EASE
+  cam.lat += (projected.position[1] - cam.lat) * FOLLOW_EASE
+  if (projected.bearing != null) {
+    cam.bearing += shortestTurn(cam.bearing, projected.bearing) * FOLLOW_EASE
+  }
+
+  const move = { center: [cam.lng, cam.lat], bearing: cam.bearing }
+
+  if (framing) {
+    const zoom = map.getZoom() + (framing.zoom - map.getZoom()) * 0.08
+    const pitch = map.getPitch() + (framing.pitch - map.getPitch()) * 0.08
+    move.zoom = zoom
+    move.pitch = pitch
+    if (
+      Math.abs(framing.zoom - zoom) < 0.02 &&
+      Math.abs(framing.pitch - pitch) < 0.5
+    ) {
+      framing = null // settled — zoom is yours again
+    }
+  }
+
+  map.jumpTo(move)
+}
+
+function startFollowing(snapToTarget = false) {
+  if (snapToTarget) cam.valid = false
+  if (!followFrame) followFrame = requestAnimationFrame(followTick)
+}
+
+function stopFollowing() {
+  cancelAnimationFrame(followFrame)
+  followFrame = 0
+  cam.valid = false
+  framing = null
+  puckAngle = null
+}
+
 function cameraFollow(immediate = false) {
-  if (!followCamera || !nav.position) return
-  map.easeTo({
-    center: nav.position,
-    zoom: NAV_ZOOM[store.mode] ?? 18,
-    pitch: 55,
-    bearing: nav.heading ?? map.getBearing(),
-    duration: immediate ? 0 : 900,
-    essential: true,
-  })
+  if (immediate) cam.valid = false
 }
 
 function drawTraveled() {
@@ -274,10 +318,13 @@ function enterNavigation() {
   map.setLayoutProperty('traveled-line', 'visibility', 'visible')
   marker?.remove()
   marker = null
+  framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55 }
+  startFollowing(true)
 }
 
 function exitNavigation() {
   setCarPoisHidden(false)
+  stopFollowing()
   puck?.remove()
   puck = null
   map.getSource('rejoin')?.setData(EMPTY)
@@ -377,7 +424,6 @@ onMounted(() => {
     // A restored session is already in the store before the style finishes
     // loading, so paint it here rather than waiting for a change event.
     if (store.route) drawRoute(store.route)
-    renderSpots()
     if (nav.active) enterNavigation()
   })
 
@@ -386,8 +432,14 @@ onMounted(() => {
   map.on('dragstart', () => {
     if (nav.active) {
       followCamera = false
+      framing = null
       userMovedAt = performance.now()
     }
+  })
+
+  // A pinch means you want a different zoom than the one we chose.
+  map.on('zoomstart', (e) => {
+    if (nav.active && e.originalEvent) framing = null
   })
 
   map.on('click', (e) => {
@@ -437,13 +489,6 @@ onMounted(() => {
   )
 
   watch(
-    () => nav.spots,
-    () => {
-      if (map.isStyleLoaded() || map.loaded()) renderSpots()
-    },
-  )
-
-  watch(
     () => nav.active,
     (active) => {
       if (!map.getSource('traveled')) return
@@ -452,15 +497,14 @@ onMounted(() => {
   )
 
   watch(
-    () => nav.position,
-    (position) => {
-      if (!position || !nav.active) return
-      ensurePuck(position)
+    () => nav.snapped,
+    (snapped) => {
+      if (!snapped || !nav.active) return
       drawTraveled()
       if (!followCamera && performance.now() - userMovedAt > 12000) {
         followCamera = true
+        startFollowing()
       }
-      cameraFollow()
     },
   )
 })
@@ -473,7 +517,7 @@ if (import.meta.env.DEV) {
 }
 
 onBeforeUnmount(() => {
-  spotMarkers.forEach((m) => m.remove())
+  stopFollowing()
   cancelAnimationFrame(animationFrame)
   resizeObserver?.disconnect()
   map?.remove()

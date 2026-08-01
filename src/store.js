@@ -2,7 +2,7 @@ import { reactive, watch } from 'vue'
 import { generateLoop } from './lib/route.js'
 import { reverseGeocode } from './lib/geocode.js'
 import { locale } from './i18n.js'
-import { loadSpots, nav, startNavigation } from './lib/nav-session.js'
+import { nav, startNavigation } from './lib/nav-session.js'
 
 export const SPEEDS = { walk: 4.8, bike: 16 } // km/h, for time → distance
 export const RANGES = {
@@ -89,29 +89,14 @@ export const store = reactive({
   clockwise: Math.random() < 0.5,
 })
 
-if (savedRoute?.spots?.length) nav.spots = savedRoute.spots
-
 watch(
   () => store.route,
   (route) => {
     try {
       if (!route) localStorage.removeItem(ROUTE_KEY)
-      else localStorage.setItem(ROUTE_KEY, JSON.stringify({ route, spots: nav.spots }))
+      else localStorage.setItem(ROUTE_KEY, JSON.stringify({ route }))
     } catch {
       /* quota or blocked — the route just won't survive a refresh */
-    }
-  },
-)
-
-// Spots arrive after the route; fold them into the same record.
-watch(
-  () => nav.spots,
-  (spots) => {
-    if (!store.route) return
-    try {
-      localStorage.setItem(ROUTE_KEY, JSON.stringify({ route: store.route, spots }))
-    } catch {
-      /* ignore */
     }
   },
 )
@@ -249,7 +234,6 @@ export async function generate({ shuffle = false } = {}) {
   store.busy = true
   store.error = ''
   try {
-    nav.spots = []
     store.route = await generateLoop({
       start: store.start.lngLat,
       targetKm: targetKm(),
@@ -259,7 +243,6 @@ export async function generate({ shuffle = false } = {}) {
       clockwise: store.clockwise,
       signal: abortController.signal,
     })
-    loadSpots(store.route) // background; the route is usable without it
   } catch (err) {
     if (err.name !== 'AbortError') {
       showError('errNoRoute')

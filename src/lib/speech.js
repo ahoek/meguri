@@ -16,12 +16,34 @@ const SPOKEN_UNIT = {
 let spokenFor = new Map() // maneuver key → smallest threshold already said
 let saidArrived = false
 let saidOffRoute = false
+let unlocked = false
+
+/**
+ * iOS Safari refuses to speak unless the very first utterance happens inside
+ * a user gesture — every later call is silently dropped. Call this straight
+ * from the tap that starts navigation to open the door.
+ */
+export function primeSpeech() {
+  const synth = window.speechSynthesis
+  if (!synth || unlocked) return
+  try {
+    const opener = new SpeechSynthesisUtterance(' ')
+    opener.volume = 0
+    opener.lang = VOICE_LANG[locale.value] ?? 'en-GB'
+    synth.speak(opener)
+    unlocked = true
+  } catch {
+    /* unsupported — guidance is silent, navigation still works */
+  }
+}
 
 export function resetSpeech() {
   spokenFor = new Map()
   saidArrived = false
   saidOffRoute = false
   window.speechSynthesis?.cancel()
+  // `unlocked` deliberately survives: the gesture permission is per page
+  // load, not per navigation session.
 }
 
 function say(text) {
@@ -30,6 +52,9 @@ function say(text) {
   const utterance = new SpeechSynthesisUtterance(text)
   utterance.lang = VOICE_LANG[locale.value] ?? 'en-GB'
   utterance.rate = 1.05
+  // iOS parks the queue when the screen locks or the tab backgrounds, and
+  // never restarts it on its own.
+  if (synth.paused) synth.resume()
   synth.cancel() // a stale instruction is worse than none
   synth.speak(utterance)
 }
