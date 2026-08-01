@@ -78,6 +78,40 @@ export function prepareRoute(route) {
 
 /** Project a position onto the route. */
 const RELOCATE_M = 60 // a worse match than this means the window was wrong
+const TIE_M = 20 // candidates this close to the best are treated as equal
+
+/**
+ * Locate the very first fix of a session.
+ *
+ * On a loop the start and the finish are the same place, so a plain
+ * nearest-point search can just as easily snap to the end of the line —
+ * which reads as "you have already gone all the way round". Among all
+ * near-equal candidates, take the earliest one.
+ */
+export function locateInitial(prepared, position) {
+  const { coords, cumulative } = prepared
+  let best = null
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    const { point, t } = projectOnSegment(coords[i], coords[i + 1], position)
+    const d = distanceKm(position, point) * 1000
+    if (!best || d < best.d - TIE_M) {
+      best = {
+        d,
+        index: i,
+        snapped: point,
+        alongKm: cumulative[i] + t * (cumulative[i + 1] - cumulative[i]),
+      }
+    }
+  }
+
+  return {
+    index: best.index,
+    snapped: best.snapped,
+    alongKm: best.alongKm,
+    offRouteM: best.d,
+  }
+}
 
 export function locateOnRoute(prepared, position, fromIndex = 0) {
   const { coords } = prepared

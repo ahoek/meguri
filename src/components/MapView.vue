@@ -224,15 +224,24 @@ function exitNavigation() {
   map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
   map.getSource('traveled')?.setData(EMPTY)
   map.setLayoutProperty('traveled-line', 'visibility', 'none')
-  map.easeTo({ pitch: 0, bearing: 0, duration: 700 })
   if (store.start) ensureMarker(store.start.lngLat)
+
+  // Flatten back to 2D as part of the same camera move: a separate easeTo
+  // would be cancelled by fitBounds, leaving the map still pitched.
   if (store.route) {
     const coords = store.route.geometry.coordinates
     const bounds = coords.reduce(
       (b, c) => b.extend(c),
       new maplibregl.LngLatBounds(coords[0], coords[0]),
     )
-    map.fitBounds(bounds, { padding: fitPadding(), duration: 900 })
+    map.fitBounds(bounds, {
+      padding: fitPadding(),
+      pitch: 0,
+      bearing: 0,
+      duration: 900,
+    })
+  } else {
+    map.easeTo({ pitch: 0, bearing: 0, duration: 700 })
   }
 }
 

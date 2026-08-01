@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import {
   prepareRoute,
   locateOnRoute,
+  locateInitial,
   nextManeuver,
   bearingBetween,
 } from './navigation.js'
@@ -39,7 +40,8 @@ let watchId = null
 let wakeLock = null
 let lastIndex = 0
 let paceKmh = 5
-let hasLeftStart = false
+let maxAlongKm = 0
+let haveFirstFix = false
 let spotsAbort = null
 let rejoinAbort = null
 let rejoinFrom = null // position the current rejoin path was computed from
@@ -87,8 +89,13 @@ function onPosition(pos) {
     paceKmh = speed * 3.6
   }
 
-  const fix = locateOnRoute(prepared, position, lastIndex)
+  // The first fix decides where on the loop we are; later ones follow on.
+  const fix = haveFirstFix
+    ? locateOnRoute(prepared, position, lastIndex)
+    : locateInitial(prepared, position)
+  haveFirstFix = true
   lastIndex = fix.index
+  maxAlongKm = Math.max(maxAlongKm, fix.alongKm)
 
   nav.snapped = fix.snapped
   nav.alongKm = fix.alongKm
@@ -108,11 +115,11 @@ function onPosition(pos) {
   const maneuver = nav.offRoute ? null : nextManeuver(prepared, fix.alongKm)
   nav.maneuver = maneuver
 
-  // The finish is also the start, so only allow arrival once we have actually
-  // set off — otherwise navigation "arrives" the moment it begins.
-  if (fix.alongKm > 0.15) hasLeftStart = true
+  // The finish is also the start, so arriving requires having actually gone
+  // round: most of the loop covered, and now back at the end of it.
   const toFinishM = (prepared.totalKm - fix.alongKm) * 1000
-  nav.arrived = hasLeftStart && toFinishM < ARRIVE_M
+  const wentRound = maxAlongKm > prepared.totalKm * 0.7
+  nav.arrived = wentRound && toFinishM < ARRIVE_M
 
   nav.spot = nav.offRoute ? null : upcomingSpot(nav.spots, fix.alongKm)
 
@@ -195,7 +202,8 @@ export function startNavigation(route, { mode = 'walk', nature = true } = {}) {
   natureOn = nature
   prepared = prepareRoute(route)
   lastIndex = 0
-  hasLeftStart = false
+  maxAlongKm = 0
+  haveFirstFix = false
   paceKmh = 5
   resetSpeech()
 
