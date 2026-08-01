@@ -169,28 +169,26 @@ input {
 }
 
 /* ---- points of interest ---- */
+/* Side information: a discreet dot, never competing with the route line.
+   The name appears on tap, and the planner lists them in full. */
 .spot-pin {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
+  width: 14px;
+  height: 14px;
   padding: 0;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: var(--accent-1);
-  color: #fff;
+  background: #f59e0b;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(12, 17, 27, 0.4);
+  box-shadow: 0 1px 4px rgba(12, 17, 27, 0.45);
   transition: transform 0.18s;
 }
 
 .spot-pin:hover {
-  transform: scale(1.15);
+  transform: scale(1.4);
 }
 
 .spot-pin svg {
-  width: 15px;
-  height: 15px;
+  display: none;
 }
 
 .spot-popup .maplibregl-popup-content {

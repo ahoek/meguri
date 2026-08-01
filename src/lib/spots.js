@@ -1,21 +1,51 @@
 import { distanceKm } from './geo.js'
 
 const OVERPASS = 'https://overpass-api.de/api/interpreter'
-const SEARCH_RADIUS_M = 70
-const MAX_SPOTS = 14
-const MIN_GAP_KM = 0.25 // don't cluster several pins on the same corner
+const SEARCH_RADIUS_M = 130
+const MAX_SPOTS = 8
+
+// A windmill is worth a detour; the third piece of a twenty-part sculpture
+// series is not. Used to choose a winner when several spots compete.
+const KIND_SCORE = {
+  viewpoint: 5,
+  windmill: 5,
+  water: 4,
+  nature: 4,
+  museum: 4,
+  heritage: 3,
+  park: 3,
+  picnic: 3,
+  artwork: 2,
+}
 
 // Only things worth looking up from the saddle or the pavement. Anything
 // generic (shops, benches, bus stops) would bury the map in noise.
 const KINDS = [
-  { key: 'viewpoint', match: (t) => t.tourism === 'viewpoint' },
-  { key: 'artwork', match: (t) => t.tourism === 'artwork' },
-  { key: 'water', match: (t) => t.natural === 'waterfall' || t.natural === 'spring' },
-  { key: 'nature', match: (t) => t.leisure === 'nature_reserve' || t.natural === 'peak' },
-  { key: 'park', match: (t) => t.leisure === 'park' || t.leisure === 'garden' },
-  { key: 'picnic', match: (t) => t.tourism === 'picnic_site' || t.amenity === 'shelter' },
-  { key: 'heritage', match: (t) => !!t.historic },
-  { key: 'windmill', match: (t) => t.man_made === 'windmill' || t.man_made === 'watermill' },
+  { key: 'viewpoint', match: (t) => t.tourism === 'viewpoint' || t.man_made === 'tower' },
+  { key: 'artwork', match: (t) => t.tourism === 'artwork' || t.tourism === 'gallery' },
+  {
+    key: 'water',
+    match: (t) =>
+      ['waterfall', 'spring', 'beach', 'bay'].includes(t.natural) ||
+      t.leisure === 'swimming_area',
+  },
+  {
+    key: 'nature',
+    match: (t) =>
+      t.leisure === 'nature_reserve' ||
+      ['peak', 'cliff', 'cave_entrance', 'tree'].includes(t.natural),
+  },
+  { key: 'park', match: (t) => ['park', 'garden'].includes(t.leisure) },
+  {
+    key: 'picnic',
+    match: (t) => t.tourism === 'picnic_site' || t.leisure === 'picnic_table',
+  },
+  { key: 'museum', match: (t) => t.tourism === 'museum' },
+  { key: 'heritage', match: (t) => !!t.historic || t.building === 'church' },
+  {
+    key: 'windmill',
+    match: (t) => ['windmill', 'watermill', 'lighthouse'].includes(t.man_made),
+  },
 ]
 
 function classify(tags) {
@@ -40,15 +70,19 @@ function buildQuery(points) {
     .map(([lng, lat]) => `${lat.toFixed(5)},${lng.toFixed(5)}`)
     .join(',')
   const filters = [
-    'node(around:R)["tourism"~"^(viewpoint|artwork|picnic_site)$"]',
+    'node(around:R)["tourism"~"^(viewpoint|artwork|picnic_site|museum|gallery)$"]',
+    'way(around:R)["tourism"~"^(viewpoint|artwork|picnic_site|museum|gallery)$"]',
     'node(around:R)["historic"]',
-    'node(around:R)["natural"~"^(waterfall|spring|peak)$"]',
-    'node(around:R)["man_made"~"^(windmill|watermill)$"]',
-    'way(around:R)["leisure"~"^(park|garden|nature_reserve)$"]',
+    'way(around:R)["historic"]',
+    'node(around:R)["natural"~"^(waterfall|spring|peak|cliff|cave_entrance)$"]',
+    'way(around:R)["natural"~"^(beach|bay)$"]',
+    'node(around:R)["man_made"~"^(windmill|watermill|lighthouse|tower)$"]',
+    'way(around:R)["man_made"~"^(windmill|watermill|lighthouse|tower)$"]',
+    'way(around:R)["leisure"~"^(park|garden|nature_reserve|swimming_area)$"]',
   ]
     .map((f) => f.replace('around:R', `around:${SEARCH_RADIUS_M},${around}`) + ';')
     .join('\n  ')
-  return `[out:json][timeout:20];\n(\n  ${filters}\n);\nout center tags 60;`
+  return `[out:json][timeout:25];\n(\n  ${filters}\n);\nout center tags 120;`
 }
 
 /**
@@ -88,7 +122,7 @@ function rank(elements, prepared, lang) {
     if (lngLat[0] == null) continue
 
     const near = nearestOnRoute(prepared, lngLat)
-    if (near.distanceKm * 1000 > SEARCH_RADIUS_M * 2) continue
+    if (near.distanceKm * 1000 > SEARCH_RADIUS_M * 1.5) continue
 
     spots.push({
       id: `${el.type}/${el.id}`,
@@ -100,15 +134,45 @@ function rank(elements, prepared, lang) {
     })
   }
 
-  spots.sort((a, b) => a.atKm - b.atKm)
+  return spread(spots, prepared.totalKm)
+}
 
-  // Spread them out so the route isn't dotted with pins in one spot.
-  const spaced = []
-  for (const spot of spots) {
-    const last = spaced[spaced.length - 1]
-    if (!last || spot.atKm - last.atKm >= MIN_GAP_KM) spaced.push(spot)
+/** Strip a trailing "3/20" so one sculpture series counts as one thing. */
+function nameKey(name) {
+  return name
+    .toLowerCase()
+    .replace(/[\s\-–]*\d+\s*[/of]*\s*\d*\s*$/, '')
+    .trim()
+}
+
+/**
+ * Pick a readable handful: divide the route into equal stretches and keep the
+ * most interesting spot in each, so pins are spread out rather than piled on
+ * whichever corner happens to be richest.
+ */
+function spread(spots, totalKm) {
+  const bucketKm = Math.max(0.4, totalKm / MAX_SPOTS)
+  const best = new Map()
+  const seenNames = new Set()
+
+  for (const spot of spots.sort((a, b) => a.atKm - b.atKm)) {
+    const key = nameKey(spot.name)
+    if (seenNames.has(key)) continue
+
+    const bucket = Math.floor(spot.atKm / bucketKm)
+    const held = best.get(bucket)
+    const score = KIND_SCORE[spot.kind] ?? 1
+    if (!held || score > held.score) {
+      if (held) seenNames.delete(nameKey(held.spot.name))
+      best.set(bucket, { spot, score })
+      seenNames.add(key)
+    }
   }
-  return spaced.slice(0, MAX_SPOTS)
+
+  return [...best.values()]
+    .map((entry) => entry.spot)
+    .sort((a, b) => a.atKm - b.atKm)
+    .slice(0, MAX_SPOTS)
 }
 
 function nearestOnRoute(prepared, lngLat) {

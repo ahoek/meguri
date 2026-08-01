@@ -13,7 +13,7 @@ import {
 } from '../store.js'
 import { searchPlaces } from '../lib/geocode.js'
 import { downloadGpx } from '../lib/gpx.js'
-import { startNavigation } from '../lib/nav-session.js'
+import { nav, startNavigation } from '../lib/nav-session.js'
 import { LOCALES, locale, setLocale, t } from '../i18n.js'
 
 const query = ref('')
@@ -358,6 +358,17 @@ const routeStats = computed(() => {
           </svg>
           {{ t('navStart') }}
         </button>
+
+        <div v-if="nav.spots.length" class="spot-list">
+          <span class="spot-list-title">{{ t('spotsAlong') }}</span>
+          <ul>
+            <li v-for="spot in nav.spots" :key="spot.id">
+              <span class="spot-bullet" aria-hidden="true"></span>
+              <span class="spot-list-name">{{ spot.name }}</span>
+              <span class="spot-list-kind">{{ t(`spot_${spot.kind}`) }}</span>
+            </li>
+          </ul>
+        </div>
 
         <div class="result-actions">
           <button class="ghost-btn" :disabled="store.busy" @click="generate({ shuffle: true })">
@@ -1041,6 +1052,59 @@ const routeStats = computed(() => {
     color: #0c111b;
     background: #eef2f8;
   }
+}
+
+.spot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.spot-list-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-3);
+}
+
+.spot-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.spot-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.spot-bullet {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.spot-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spot-list-kind {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-3);
 }
 
 .result-actions {
