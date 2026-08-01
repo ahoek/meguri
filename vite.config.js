@@ -8,6 +8,10 @@ const base = process.env.BASE_PATH || '/'
 
 export default defineConfig({
   base,
+  test: {
+    environment: 'happy-dom',
+    include: ['test/**/*.test.js'],
+  },
   preview: {
     allowedHosts: ['.trycloudflare.com'],
   },

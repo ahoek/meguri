@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "maplibre-gl": "^5.6.0",
@@ -14,9 +16,11 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.4",
+    "happy-dom": "^20.11.1",
     "sharp": "^0.35.3",
     "vite": "^6.3.5",
-    "vite-plugin-pwa": "^1.0.0"
+    "vite-plugin-pwa": "^1.0.0",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "sharp@0.35.3": true

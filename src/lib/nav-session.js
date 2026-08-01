@@ -22,7 +22,17 @@ const BACK_ON_ROUTE_M = 30
 // Nothing plausible happens faster than this, whatever the GPS claims.
 const MAX_SPEED_KMH = { walk: 12, bike: 45 }
 const DEFAULT_PACE_KMH = { walk: 4.8, bike: 16 }
-const PACE_SMOOTHING = 0.12 // exponential moving average weight per fix
+
+// Two different speeds, because they answer different questions.
+// `paceKmh` is how fast you are going *now* — it must fall to zero the moment
+// you stop, or the display keeps sliding forward while you stand still. It is
+// smoothed lightly so it reacts quickly.
+const PACE_SMOOTHING = 0.4
+// `movingPaceKmh` is how fast you travel when you are travelling, used for
+// arrival time. Waiting at a light shouldn't push your ETA to infinity, so
+// this one only samples while actually moving, and smooths heavily.
+const MOVING_PACE_SMOOTHING = 0.12
+const MOVING_THRESHOLD_KMH = 2.5
 
 export const nav = reactive({
   active: false,
@@ -35,6 +45,7 @@ export const nav = reactive({
   remainingKm: 0,
   remainingSec: 0,
   paceKmh: 0, // smoothed, for dead reckoning between fixes
+  stationary: true, // the device says you are not moving — never extrapolate
   fixAt: 0, // performance.now() of the last accepted fix
   maneuver: null, // { kind, distanceM, exit }
   offRoute: false,
@@ -50,7 +61,8 @@ let wakeLock = null
 let lastIndex = 0
 let alongKm = 0
 let maxAlongKm = 0
-let paceKmh = DEFAULT_PACE_KMH.walk
+let paceKmh = 0
+let movingPaceKmh = DEFAULT_PACE_KMH.walk
 let lastFixAt = 0
 let lastAcceptedAt = 0
 let doubts = 0
@@ -91,14 +103,19 @@ function onVisibility() {
   }
 }
 
-/** Update the running pace estimate from this fix, ignoring noise. */
+/**
+ * Update the speed estimates from this fix.
+ *
+ * Zero is a real measurement, not noise: discarding it was what kept the
+ * display gliding forward at riding speed while the rider stood still.
+ */
 function updatePace(gpsSpeed, advancedKm, dtSec) {
   const ceiling = MAX_SPEED_KMH[profileMode]
   let sample = null
 
-  if (typeof gpsSpeed === 'number' && gpsSpeed > 0.6) {
+  if (typeof gpsSpeed === 'number' && !Number.isNaN(gpsSpeed) && gpsSpeed >= 0) {
     sample = gpsSpeed * 3.6
-  } else if (dtSec > 2 && advancedKm > 0.002) {
+  } else if (dtSec >= 1) {
     // No speed from the device — derive it from progress along the route.
     sample = (advancedKm / dtSec) * 3600
   }
@@ -106,9 +123,18 @@ function updatePace(gpsSpeed, advancedKm, dtSec) {
   if (sample == null) return
   if (sample > ceiling) return // a GPS spike, not a person
 
-  // Smoothed, so the arrival time doesn't jump every second.
-  paceKmh = paceKmh + (sample - paceKmh) * PACE_SMOOTHING
-  paceKmh = Math.min(Math.max(paceKmh, 1.5), ceiling)
+  if (sample < MOVING_THRESHOLD_KMH) {
+    // A stop is not a trend to be averaged into — take it at face value.
+    paceKmh = sample
+  } else {
+    paceKmh += (sample - paceKmh) * PACE_SMOOTHING
+  }
+  paceKmh = Math.min(Math.max(paceKmh, 0), ceiling)
+
+  if (sample >= MOVING_THRESHOLD_KMH) {
+    movingPaceKmh += (sample - movingPaceKmh) * MOVING_PACE_SMOOTHING
+    movingPaceKmh = Math.min(Math.max(movingPaceKmh, 1.5), ceiling)
+  }
 }
 
 // Give up doubting after this many fixes in a row: if the GPS keeps insisting,
@@ -179,11 +205,23 @@ function onPosition(pos) {
   else if (fix.offRouteM < BACK_ON_ROUTE_M) strayFixes = 0
   nav.offRoute = strayFixes >= OFF_ROUTE_FIXES
 
+  // Believe the device over our own estimate: a reported speed settles the
+  // question of whether you are moving on this very fix, with no filter to
+  // decay through first. Only fall back to the estimate if it says nothing.
+  const reportedKmh =
+    typeof speed === 'number' && !Number.isNaN(speed) && speed >= 0
+      ? speed * 3.6
+      : null
+  nav.stationary =
+    reportedKmh != null
+      ? reportedKmh < MOVING_THRESHOLD_KMH
+      : paceKmh < MOVING_THRESHOLD_KMH
+
   nav.alongKm = alongKm
   nav.paceKmh = paceKmh
   nav.fixAt = performance.now()
   nav.remainingKm = Math.max(0, prepared.totalKm - alongKm)
-  nav.remainingSec = (nav.remainingKm / paceKmh) * 3600
+  nav.remainingSec = (nav.remainingKm / movingPaceKmh) * 3600
 
   // Point the way the route runs, not the way the GPS thinks you're facing:
   // course over ground is wild at walking pace and jitters on a bike.
@@ -268,7 +306,8 @@ export function startNavigation(route, { mode = 'walk', nature = true } = {}) {
   lastIndex = 0
   alongKm = 0
   maxAlongKm = 0
-  paceKmh = DEFAULT_PACE_KMH[mode] ?? DEFAULT_PACE_KMH.walk
+  paceKmh = 0
+  movingPaceKmh = DEFAULT_PACE_KMH[mode] ?? DEFAULT_PACE_KMH.walk
   lastFixAt = 0
   lastAcceptedAt = 0
   doubts = 0
@@ -288,9 +327,10 @@ export function startNavigation(route, { mode = 'walk', nature = true } = {}) {
     accuracy: null,
     alongKm: 0,
     paceKmh,
+    stationary: true,
     fixAt: 0,
     remainingKm: prepared.totalKm,
-    remainingSec: (prepared.totalKm / paceKmh) * 3600,
+    remainingSec: (prepared.totalKm / movingPaceKmh) * 3600,
     maneuver: null,
     offRoute: false,
     arrived: false,

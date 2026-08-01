@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { store, setStart } from '../store.js'
+import { distanceKm } from '../lib/geo.js'
 import { nav, preparedRoute, currentIndex } from '../lib/nav-session.js'
 import {
   traveledLine,
@@ -232,12 +233,24 @@ const NAV_ZOOM = { walk: 20.4, bike: 20 }
 // the position forward along the route at the current pace and let each new
 // fix gently correct it.
 const FOLLOW_EASE = 0.12 // fraction of the remaining gap closed per frame
+const POSITION_EASE = 0.1 // how fast the shown position converges on the truth
 // Turning is eased far more slowly than panning: the map swinging round at
 // the same rate it slides felt abrupt at corners.
 const BEARING_EASE = 0.035
 const FRAMING_EASE = 0.05 // zoom, pitch and padding settling in or out
-const MAX_DEAD_RECKON_S = 8 // stop guessing if the GPS has really gone quiet
+// Carrying the position forward between fixes keeps motion continuous, but
+// every metre guessed is a metre that may have to be taken back when the next
+// fix lands. So guess briefly, conservatively, and never while stopped —
+// undershooting means corrections are always forward, which reads as motion
+// rather than as a jerk backwards.
+const MAX_DEAD_RECKON_S = 3
+const DEAD_RECKON_DAMPING = 0.5
+const MAX_DEAD_RECKON_KM = 0.012
+const MOVING_KMH = 1.5
 const cam = { lng: 0, lat: 0, bearing: 0, valid: false }
+// The position actually drawn: eased towards the projection so a correction
+// arrives as a slow slide rather than a snap.
+const shown = { lng: 0, lat: 0, valid: false }
 let followFrame = 0
 // The per-frame jumpTo would cancel any easeTo, so the navigation framing has
 // to be eased inside the same loop. Once it has settled we stop touching zoom
@@ -254,7 +267,9 @@ function projectedNow() {
   if (!prepared) return null
 
   if (nav.offRoute || !nav.fixAt) {
-    const raw = nav.snapped ?? nav.position
+    // Off the route, show where you actually are — not where you'd be if you
+    // were still on it. Seeing the gap is the whole point of the warning.
+    const raw = nav.offRoute ? nav.position : (nav.snapped ?? nav.position)
     return raw
       ? {
           position: raw,
@@ -266,7 +281,11 @@ function projectedNow() {
   }
 
   const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, MAX_DEAD_RECKON_S)
-  const km = nav.alongKm + (nav.paceKmh / 3600) * elapsed
+  const ahead =
+    nav.stationary || nav.paceKmh < MOVING_KMH
+      ? 0 // standing still: the arrow stays put
+      : Math.min((nav.paceKmh / 3600) * elapsed * DEAD_RECKON_DAMPING, MAX_DEAD_RECKON_KM)
+  const km = nav.alongKm + ahead
   const { position, index } = positionAtKm(prepared, km)
   return {
     position,
@@ -285,28 +304,33 @@ function followTick() {
   const projected = projectedNow()
   if (!projected) return
 
-  // The puck rides the projection too, so it glides rather than hopping.
-  ensurePuck(projected.position, projected.bearing)
-  // …and so does the grey trail behind it. Redrawing only on each GPS fix
-  // left colour on road the rider had already passed.
-  paintTraveled(projected)
+  if (!shown.valid) {
+    shown.lng = projected.position[0]
+    shown.lat = projected.position[1]
+    shown.valid = true
+  }
+  shown.lng += (projected.position[0] - shown.lng) * POSITION_EASE
+  shown.lat += (projected.position[1] - shown.lat) * POSITION_EASE
+  const here = [shown.lng, shown.lat]
+
+  ensurePuck(here, projected.bearing)
+  if (nav.offRoute) drawRejoin()
+  // The grey trail ends where the arrow is, not where the last fix was.
+  paintTraveled({ position: here, index: projected.index })
 
   if (!followCamera) return
 
   if (!cam.valid) {
-    cam.lng = projected.position[0]
-    cam.lat = projected.position[1]
     cam.bearing = projected.cameraBearing ?? map.getBearing()
     cam.valid = true
   }
-
-  cam.lng += (projected.position[0] - cam.lng) * FOLLOW_EASE
-  cam.lat += (projected.position[1] - cam.lat) * FOLLOW_EASE
   if (projected.cameraBearing != null) {
     cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * BEARING_EASE
   }
 
-  const move = { center: [cam.lng, cam.lat], bearing: cam.bearing }
+  // Centre on the same eased point the arrow uses, so it holds still on
+  // screen and the world moves under it.
+  const move = { center: here, bearing: cam.bearing }
 
   if (framing) {
     const zoom = map.getZoom() + (framing.zoom - map.getZoom()) * FRAMING_EASE
@@ -342,6 +366,7 @@ function stopFollowing() {
   cancelAnimationFrame(followFrame)
   followFrame = 0
   cam.valid = false
+  shown.valid = false
   framing = null
   puckAngle = null
 }
@@ -355,6 +380,42 @@ function refreshNavPadding() {
 
 function cameraFollow(immediate = false) {
   if (immediate) cam.valid = false
+}
+
+/**
+ * The dashed way back, which BRouter returned as real road geometry. It is
+ * only recomputed every so often, so as the rider moves along it we trim off
+ * the part already covered rather than drawing a line from them to it — a
+ * straight bridge would cut across gardens and canals and suggest a way
+ * through that isn't there.
+ */
+function drawRejoin() {
+  const source = map.getSource('rejoin')
+  if (!source) return
+  if (!nav.rejoin || !nav.offRoute) {
+    source.setData(EMPTY)
+    return
+  }
+
+  const path = nav.rejoin.coordinates
+  const from = nav.position
+  if (!from || path.length < 2) {
+    source.setData(routeFeature(path))
+    return
+  }
+
+  let nearest = 0
+  let best = Infinity
+  for (let i = 0; i < path.length; i++) {
+    const d = distanceKm(from, path[i])
+    if (d < best) {
+      best = d
+      nearest = i
+    }
+  }
+  // Keep at least a couple of points so it still reads as a line.
+  const ahead = path.slice(Math.min(nearest, path.length - 2))
+  source.setData(routeFeature(ahead))
 }
 
 let traveledPaintedAt = 0
@@ -373,8 +434,12 @@ function paintTraveled(projected) {
   if (now - traveledPaintedAt < 120) return
   traveledPaintedAt = now
 
-  const index = projected.index ?? currentIndex()
-  source.setData(routeFeature(traveledLine(prepared, index, projected.position)))
+  // Off the route the rider is somewhere else entirely; the trail still marks
+  // how far along the route they got, so it ends at the projection.
+  const tip = nav.offRoute ? nav.snapped : projected.position
+  if (!tip) return
+  const index = nav.offRoute ? currentIndex() : (projected.index ?? currentIndex())
+  source.setData(routeFeature(traveledLine(prepared, index, tip)))
 }
 
 /**
@@ -396,9 +461,12 @@ function enterNavigation() {
 
   // Start the camera from wherever the planner left it and let the loop glide
   // in — zoom, tilt, padding and centre all travelling together.
+  // Start the shown position at the planner's centre so the loop glides in
+  // from there, rather than cutting straight to the rider.
   const centre = map.getCenter()
-  cam.lng = centre.lng
-  cam.lat = centre.lat
+  shown.lng = centre.lng
+  shown.lat = centre.lat
+  shown.valid = true
   cam.bearing = map.getBearing()
   cam.valid = true
 
@@ -574,11 +642,7 @@ onMounted(() => {
 
   watch(
     () => nav.rejoin,
-    (rejoin) => {
-      const source = map.getSource('rejoin')
-      if (!source) return
-      source.setData(rejoin ? routeFeature(rejoin.coordinates) : EMPTY)
-    },
+    () => drawRejoin(),
   )
 
   watch(

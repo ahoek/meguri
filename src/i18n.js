@@ -67,7 +67,7 @@ const messages = {
     nav_finish: 'finish',
   },
   nl: {
-    tagline: 'Rondjes om lekker te dwalen',
+    tagline: 'Rondjes om lekker te struinen',
     walk: 'Wandelen',
     bike: 'Fietsen',
     activity: 'Activiteit',
