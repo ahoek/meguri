@@ -156,6 +156,64 @@ function renderSpots() {
   }
 }
 
+// Driving infrastructure is clutter on foot or on a bike: it competes with
+// the route line and none of it is somewhere you're going.
+const CAR_POI_CLASSES = [
+  'parking',
+  'parking_garage',
+  'fuel',
+  'car',
+  'car_repair',
+  'car_parts',
+  'car_rental',
+  'car_wash',
+  'charging_station',
+  'motorcycle',
+  'driving_school',
+]
+const CAR_POI_SUBCLASSES = [
+  'parking',
+  'parking_garage',
+  'parking_space',
+  'parking_entrance',
+  'fuel',
+  'car',
+  'car_repair',
+  'car_parts',
+  'car_rental',
+  'car_wash',
+  'charging_station',
+  'motorcycle',
+  'tyres',
+]
+const POI_LAYERS = ['poi_r1', 'poi_r7', 'poi_r20']
+let basePoiFilters = null
+
+/** Hide car-only points of interest while navigating; restore them after. */
+function setCarPoisHidden(hidden) {
+  if (!basePoiFilters) {
+    basePoiFilters = {}
+    for (const id of POI_LAYERS) {
+      if (map.getLayer(id)) basePoiFilters[id] = map.getFilter(id) ?? null
+    }
+  }
+
+  const exclude = [
+    '!',
+    [
+      'any',
+      ['match', ['get', 'class'], CAR_POI_CLASSES, true, false],
+      ['match', ['get', 'subclass'], CAR_POI_SUBCLASSES, true, false],
+    ],
+  ]
+
+  for (const [id, base] of Object.entries(basePoiFilters)) {
+    if (!map.getLayer(id)) continue
+    if (!hidden) map.setFilter(id, base)
+    else map.setFilter(id, base ? ['all', base, exclude] : exclude)
+  }
+}
+
 /**
  * Drop the style's 3D buildings. At walking and cycling zoom they tower over
  * the pitched navigation view and hide the street you're meant to be on.
@@ -210,6 +268,7 @@ function drawTraveled() {
 }
 
 function enterNavigation() {
+  setCarPoisHidden(true)
   followCamera = true
   map.setPadding({ top: 240, bottom: 160, left: 0, right: 0 })
   map.setLayoutProperty('traveled-line', 'visibility', 'visible')
@@ -218,6 +277,7 @@ function enterNavigation() {
 }
 
 function exitNavigation() {
+  setCarPoisHidden(false)
   puck?.remove()
   puck = null
   map.getSource('rejoin')?.setData(EMPTY)
@@ -404,6 +464,13 @@ onMounted(() => {
     },
   )
 })
+
+if (import.meta.env.DEV) {
+  // Lets simulated-navigation checks inspect layers and filters.
+  onMounted(() => {
+    window.__map = map
+  })
+}
 
 onBeforeUnmount(() => {
   spotMarkers.forEach((m) => m.remove())
