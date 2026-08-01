@@ -144,26 +144,22 @@ input {
 
 /* ---- navigation puck ---- */
 .nav-puck {
-  width: 30px;
-  height: 30px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.2);
 }
 
 .nav-puck-arrow {
   width: 0;
   height: 0;
-  border-left: 9px solid transparent;
-  border-right: 9px solid transparent;
-  border-bottom: 20px solid #2563eb;
-  filter: drop-shadow(0 1px 3px rgba(12, 17, 27, 0.5));
-  transition: rotate 0.4s ease-out;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-bottom: 31px solid #2563eb;
+  /* A white rim keeps it readable over dark tiles and the route line. */
+  filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 1px 4px rgba(12, 17, 27, 0.55));
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .nav-puck-arrow {
-    transition: none;
-  }
-}
+

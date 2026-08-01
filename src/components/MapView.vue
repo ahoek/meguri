@@ -3,7 +3,12 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import { store, setStart } from '../store.js'
 import { nav, preparedRoute, currentIndex } from '../lib/nav-session.js'
-import { traveledLine, positionAtKm } from '../lib/navigation.js'
+import {
+  traveledLine,
+  positionAtKm,
+  bearingAlong,
+  segmentBearingAt,
+} from '../lib/navigation.js'
 import { t } from '../i18n.js'
 
 const container = ref(null)
@@ -21,8 +26,8 @@ defineExpose({
   recenter() {
     followCamera = true
     userMovedAt = 0
-    framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55 }
-    startFollowing(true)
+    framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() }
+    startFollowing()
   },
 })
 
@@ -181,6 +186,11 @@ function removeExtrusions() {
   }
 }
 
+// Segment bearings step from one vertex to the next, and a mapped road can
+// kink by tens of degrees between them. Ease onto the target so the arrow
+// swings through a corner instead of flicking. Fast enough to stay honest —
+// on a straight it settles within a few frames.
+const PUCK_EASE = 0.14
 let puckAngle = null
 
 function ensurePuck(lngLat, bearing) {
@@ -188,7 +198,14 @@ function ensurePuck(lngLat, bearing) {
     const el = document.createElement('div')
     el.className = 'nav-puck'
     el.innerHTML = '<span class="nav-puck-arrow"></span>'
-    puck = new maplibregl.Marker({ element: el, pitchAlignment: 'map' })
+    // rotationAlignment 'map' ties the arrow to the world, so MapLibre backs
+    // out the map's own rotation. Rotating the element in screen space
+    // instead made it point the wrong way as soon as the map turned.
+    puck = new maplibregl.Marker({
+      element: el,
+      pitchAlignment: 'map',
+      rotationAlignment: 'map',
+    })
       .setLngLat(lngLat)
       .addTo(map)
   } else {
@@ -196,16 +213,18 @@ function ensurePuck(lngLat, bearing) {
   }
   if (bearing == null) return
 
-  // Unwrap the angle so turning past north rotates the short way round
-  // instead of spinning 359 degrees the other way.
+  // Unwrap so a turn past north takes the short way round rather than
+  // spinning almost the whole way back.
   puckAngle =
-    puckAngle == null ? bearing : puckAngle + shortestTurn(puckAngle, bearing)
-  puck.getElement().firstElementChild.style.rotate = `${puckAngle}deg`
+    puckAngle == null
+      ? bearing
+      : puckAngle + shortestTurn(puckAngle, bearing) * PUCK_EASE
+  puck.setRotation(puckAngle)
 }
 
 // Walking needs to see the next side street; cycling covers ground faster
 // and wants a little more look-ahead.
-const NAV_ZOOM = { walk: 19, bike: 18.2 }
+const NAV_ZOOM = { walk: 20.4, bike: 20 }
 
 // Phones deliver a fix every one to several seconds. Easing to each arrival
 // stalls between them and then lurches, which is what made following feel
@@ -213,6 +232,10 @@ const NAV_ZOOM = { walk: 19, bike: 18.2 }
 // the position forward along the route at the current pace and let each new
 // fix gently correct it.
 const FOLLOW_EASE = 0.12 // fraction of the remaining gap closed per frame
+// Turning is eased far more slowly than panning: the map swinging round at
+// the same rate it slides felt abrupt at corners.
+const BEARING_EASE = 0.035
+const FRAMING_EASE = 0.05 // zoom, pitch and padding settling in or out
 const MAX_DEAD_RECKON_S = 8 // stop guessing if the GPS has really gone quiet
 const cam = { lng: 0, lat: 0, bearing: 0, valid: false }
 let followFrame = 0
@@ -232,13 +255,27 @@ function projectedNow() {
 
   if (nav.offRoute || !nav.fixAt) {
     const raw = nav.snapped ?? nav.position
-    return raw ? { position: raw, bearing: nav.heading } : null
+    return raw
+      ? {
+          position: raw,
+          index: currentIndex(),
+          bearing: nav.heading,
+          cameraBearing: nav.heading,
+        }
+      : null
   }
 
   const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, MAX_DEAD_RECKON_S)
-  const ahead = (nav.paceKmh / 3600) * elapsed
-  const { position, bearing } = positionAtKm(prepared, nav.alongKm + ahead)
-  return { position, bearing }
+  const km = nav.alongKm + (nav.paceKmh / 3600) * elapsed
+  const { position, index } = positionAtKm(prepared, km)
+  return {
+    position,
+    index,
+    // The arrow shows the road you are on, measured from where you stand.
+    bearing: segmentBearingAt(prepared, index, position),
+    // The camera aims further ahead so it turns smoothly instead of snapping.
+    cameraBearing: bearingAlong(prepared, km),
+  }
 }
 
 function followTick() {
@@ -250,32 +287,44 @@ function followTick() {
 
   // The puck rides the projection too, so it glides rather than hopping.
   ensurePuck(projected.position, projected.bearing)
+  // …and so does the grey trail behind it. Redrawing only on each GPS fix
+  // left colour on road the rider had already passed.
+  paintTraveled(projected)
 
   if (!followCamera) return
 
   if (!cam.valid) {
     cam.lng = projected.position[0]
     cam.lat = projected.position[1]
-    cam.bearing = projected.bearing ?? map.getBearing()
+    cam.bearing = projected.cameraBearing ?? map.getBearing()
     cam.valid = true
   }
 
   cam.lng += (projected.position[0] - cam.lng) * FOLLOW_EASE
   cam.lat += (projected.position[1] - cam.lat) * FOLLOW_EASE
-  if (projected.bearing != null) {
-    cam.bearing += shortestTurn(cam.bearing, projected.bearing) * FOLLOW_EASE
+  if (projected.cameraBearing != null) {
+    cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * BEARING_EASE
   }
 
   const move = { center: [cam.lng, cam.lat], bearing: cam.bearing }
 
   if (framing) {
-    const zoom = map.getZoom() + (framing.zoom - map.getZoom()) * 0.08
-    const pitch = map.getPitch() + (framing.pitch - map.getPitch()) * 0.08
+    const zoom = map.getZoom() + (framing.zoom - map.getZoom()) * FRAMING_EASE
+    const pitch = map.getPitch() + (framing.pitch - map.getPitch()) * FRAMING_EASE
+    const pad = map.getPadding()
+    const padding = {
+      top: pad.top + (framing.padding.top - pad.top) * FRAMING_EASE,
+      bottom: pad.bottom + (framing.padding.bottom - pad.bottom) * FRAMING_EASE,
+      left: 0,
+      right: 0,
+    }
     move.zoom = zoom
     move.pitch = pitch
+    move.padding = padding
     if (
       Math.abs(framing.zoom - zoom) < 0.02 &&
-      Math.abs(framing.pitch - pitch) < 0.5
+      Math.abs(framing.pitch - pitch) < 0.5 &&
+      Math.abs(framing.padding.top - padding.top) < 2
     ) {
       framing = null // settled — zoom is yours again
     }
@@ -297,29 +346,68 @@ function stopFollowing() {
   puckAngle = null
 }
 
+// Keep the arrow low after a rotate or a keyboard resize.
+function refreshNavPadding() {
+  if (!nav.active) return
+  if (framing) framing.padding = navPadding()
+  else map.setPadding(navPadding())
+}
+
 function cameraFollow(immediate = false) {
   if (immediate) cam.valid = false
 }
 
-function drawTraveled() {
+let traveledPaintedAt = 0
+
+/**
+ * Grey out the route behind the rider. Follows the interpolated position so
+ * the boundary sits under the arrow rather than trailing a fix behind it.
+ */
+function paintTraveled(projected) {
   const prepared = preparedRoute()
   const source = map.getSource('traveled')
-  if (!prepared || !nav.position || !source) return
-  // Draw to the projected point, not the raw fix: when you wander off, the
-  // travelled line should end on the route, not stretch out to you.
-  const snapped = nav.snapped ?? nav.position
-  source.setData(routeFeature(traveledLine(prepared, currentIndex(), snapped)))
+  if (!prepared || !source) return
+
+  // A few times a second is plenty and keeps long routes cheap.
+  const now = performance.now()
+  if (now - traveledPaintedAt < 120) return
+  traveledPaintedAt = now
+
+  const index = projected.index ?? currentIndex()
+  source.setData(routeFeature(traveledLine(prepared, index, projected.position)))
+}
+
+/**
+ * Shift the camera centre downwards so the arrow sits near the bottom of the
+ * screen and the road ahead gets the space instead.
+ */
+function navPadding() {
+  const height = container.value?.clientHeight ?? window.innerHeight
+  const dash = 150
+  return { top: Math.round(height * 0.4) + dash, bottom: dash, left: 0, right: 0 }
 }
 
 function enterNavigation() {
   setCarPoisHidden(true)
   followCamera = true
-  map.setPadding({ top: 240, bottom: 160, left: 0, right: 0 })
   map.setLayoutProperty('traveled-line', 'visibility', 'visible')
   marker?.remove()
   marker = null
-  framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55 }
-  startFollowing(true)
+
+  // Start the camera from wherever the planner left it and let the loop glide
+  // in — zoom, tilt, padding and centre all travelling together.
+  const centre = map.getCenter()
+  cam.lng = centre.lng
+  cam.lat = centre.lat
+  cam.bearing = map.getBearing()
+  cam.valid = true
+
+  framing = {
+    zoom: NAV_ZOOM[store.mode] ?? 18,
+    pitch: 55,
+    padding: navPadding(),
+  }
+  startFollowing()
 }
 
 function exitNavigation() {
@@ -328,7 +416,6 @@ function exitNavigation() {
   puck?.remove()
   puck = null
   map.getSource('rejoin')?.setData(EMPTY)
-  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
   map.getSource('traveled')?.setData(EMPTY)
   map.setLayoutProperty('traveled-line', 'visibility', 'none')
   if (store.start) ensureMarker(store.start.lngLat)
@@ -341,14 +428,16 @@ function exitNavigation() {
       (b, c) => b.extend(c),
       new maplibregl.LngLatBounds(coords[0], coords[0]),
     )
+    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
     map.fitBounds(bounds, {
       padding: fitPadding(),
       pitch: 0,
       bearing: 0,
-      duration: 900,
+      duration: 1100,
     })
   } else {
-    map.easeTo({ pitch: 0, bearing: 0, duration: 700 })
+    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
+    map.easeTo({ pitch: 0, bearing: 0, duration: 900 })
   }
 }
 
@@ -365,7 +454,10 @@ onMounted(() => {
 
   // The container can be laid out after map init (style injection timing),
   // so track its size ourselves.
-  resizeObserver = new ResizeObserver(() => map.resize())
+  resizeObserver = new ResizeObserver(() => {
+    map.resize()
+    refreshNavPadding()
+  })
   resizeObserver.observe(container.value)
 
   map.on('load', () => {
@@ -378,7 +470,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#ffffff',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 7, 16, 13],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 9, 16, 17, 20, 24],
         'line-opacity': 0.9,
       },
     })
@@ -388,7 +480,8 @@ onMounted(() => {
       source: 'route',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4, 16, 8],
+        // Wider at navigation zooms, where the line is the thing you follow.
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 11, 20, 17],
         'line-gradient': lineGradient(store.mode),
       },
     })
@@ -402,7 +495,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#f59e0b',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4, 16, 7],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 10, 20, 14],
         'line-dasharray': [1.6, 1.2],
       },
     })
@@ -416,7 +509,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'none' },
       paint: {
         'line-color': '#94a3b8',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4, 16, 8],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 11, 20, 17],
         'line-opacity': 0.85,
       },
     })
@@ -500,7 +593,6 @@ onMounted(() => {
     () => nav.snapped,
     (snapped) => {
       if (!snapped || !nav.active) return
-      drawTraveled()
       if (!followCamera && performance.now() - userMovedAt > 12000) {
         followCamera = true
         startFollowing()

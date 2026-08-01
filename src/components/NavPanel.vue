@@ -46,9 +46,12 @@ function formatDistance(metres) {
   return `${Math.max(0, Math.round(metres / 5) * 5)} m`
 }
 
-const maneuverDistance = computed(() =>
-  nav.maneuver ? formatDistance(nav.maneuver.distanceM) : '',
-)
+const maneuverDistance = computed(() => {
+  if (!nav.maneuver) return ''
+  // Rounding put "0 m" on the banner once you were on top of the turn.
+  if (nav.maneuver.distanceM < 10) return t('navNow')
+  return formatDistance(nav.maneuver.distanceM)
+})
 
 const remaining = computed(() => {
   const km = nav.remainingKm

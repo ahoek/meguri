@@ -191,17 +191,6 @@ function projectOnSegment(a, b, p) {
 }
 
 /**
- * Which way the route runs at `index`, averaged over a short span ahead so a
- * single kinked vertex doesn't spin the arrow.
- */
-export function routeBearingAt(prepared, index) {
-  const { coords } = prepared
-  const from = coords[Math.max(0, Math.min(index, coords.length - 2))]
-  const to = coords[Math.min(index + 4, coords.length - 1)]
-  return bearingBetween(from, to)
-}
-
-/**
  * The point `km` along the route, interpolated within its segment. Used to
  * carry the display forward between GPS fixes.
  */
@@ -221,11 +210,64 @@ export function positionAtKm(prepared, km) {
   const f = span > 0 ? (target - cumulative[lo]) / span : 0
   const a = coords[lo]
   const b = coords[hi]
+  // No bearing here: direction comes from bearingAlong(), which is built on
+  // this function and would recurse.
   return {
     position: [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f],
     index: lo,
-    bearing: routeBearingAt(prepared, lo),
   }
+}
+
+/**
+ * The direction of the road you are actually on: the polyline segment under
+ * your feet, extended just far enough to be stable on finely mapped ways.
+ *
+ * Distinct from bearingAlong(), which averages over a window and therefore
+ * straddles both legs of a corner — giving a direction that matches neither.
+ */
+export function segmentBearingAt(prepared, index, from = null) {
+  const { coords, cumulative } = prepared
+  const start = Math.max(0, Math.min(index, coords.length - 2))
+  const origin = from ?? coords[start]
+
+  // Step forward until the segment is long enough to have a clear direction.
+  const MIN_SPAN_KM = 0.012
+  let end = start + 1
+  while (
+    end < coords.length - 1 &&
+    cumulative[end] - cumulative[start] < MIN_SPAN_KM
+  ) {
+    end += 1
+  }
+  return bearingBetween(origin, coords[end])
+}
+
+// Look this far up the road to decide "which way am I heading". Measured in
+// distance, not vertices: vertex spacing varies wildly, so a fixed count
+// swings the arrow on densely mapped corners and lags on long straights.
+const HEADING_LOOKAHEAD_KM = 0.035
+
+/** Which way the route runs at `index`. */
+export function routeBearingAt(prepared, index) {
+  return bearingAlong(prepared, prepared.cumulative[index] ?? 0)
+}
+
+/**
+ * Which way the route runs at a distance along it.
+ *
+ * `lookaheadKm` decides how far up the road to aim. The arrow uses a short
+ * one so it turns into a corner as you reach it; the camera uses a longer one
+ * so it holds the general direction and doesn't lurch at every bend.
+ */
+export function bearingAlong(prepared, km, lookaheadKm = HEADING_LOOKAHEAD_KM) {
+  const here = positionAtKm(prepared, km)
+  const ahead = positionAtKm(prepared, km + lookaheadKm)
+  // At the very end there's nothing ahead to aim at; keep the last direction.
+  if (here.position[0] === ahead.position[0] && here.position[1] === ahead.position[1]) {
+    const back = positionAtKm(prepared, Math.max(0, km - lookaheadKm))
+    return bearingBetween(back.position, here.position)
+  }
+  return bearingBetween(here.position, ahead.position)
 }
 
 /** The next maneuver at or after `alongKm`, with its distance in metres. */
