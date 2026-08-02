@@ -85,6 +85,7 @@ export const store = reactive({
   busy: false,
   error: '',
   flyTo: null, // { center, zoom, id } — MapView watches this
+  sheetInset: 0, // px of viewport covered by the mobile sheet; MapView pads around it
   bearing: Math.random() * 360,
   clockwise: Math.random() < 0.5,
 })

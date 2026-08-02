@@ -63,11 +63,12 @@ function routeFeature(coordinates) {
 }
 
 function fitPadding() {
-  // The bottom sheet auto-collapses to ~62px once a route arrives, so the
-  // route can use nearly the whole screen on mobile.
+  // On mobile, fit into whatever strip the bottom sheet leaves visible. The
+  // sheet auto-collapses once a route arrives, so this is usually just the
+  // handle strip.
   const mobile = matchMedia('(max-width: 760px)').matches
   return mobile
-    ? { top: 70, left: 36, right: 36, bottom: 140 }
+    ? { top: 70, left: 36, right: 36, bottom: (store.sheetInset || 58) + 40 }
     : { top: 90, left: 470, right: 90, bottom: 90 }
 }
 
@@ -646,7 +647,34 @@ onMounted(() => {
   watch(
     () => store.flyTo,
     (target) => {
-      if (target) map.flyTo({ center: target.center, zoom: target.zoom, duration: 1400 })
+      if (!target) return
+      map.flyTo({
+        center: target.center,
+        zoom: target.zoom,
+        duration: 1400,
+        // Land centred in the strip the sheet leaves visible.
+        offset: [0, -store.sheetInset / 2],
+      })
+    },
+  )
+
+  // Sheet opened or closed: keep the view centred on the visible strip. With
+  // a route, refit the whole loop; otherwise shift by half the change so the
+  // same point stays in the middle of what you can see.
+  watch(
+    () => store.sheetInset,
+    (inset, oldInset) => {
+      if (nav.active) return
+      if (store.route) {
+        const coords = store.route.geometry.coordinates
+        const bounds = coords.reduce(
+          (b, c) => b.extend(c),
+          new maplibregl.LngLatBounds(coords[0], coords[0]),
+        )
+        map.fitBounds(bounds, { padding: fitPadding(), duration: 500 })
+      } else {
+        map.panBy([0, (inset - (oldInset ?? 0)) / 2], { duration: 350 })
+      }
     },
   )
 

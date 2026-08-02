@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   store,
   RANGES,
@@ -28,7 +28,8 @@ let searchAbort = null
 // Mobile bottom sheet: collapse to a slim bar so the route stays visible.
 const collapsed = ref(false)
 const isMobile = () => matchMedia('(max-width: 760px)').matches
-let touchStartY = null
+const panelEl = ref(null)
+const HANDLE_H = 58 // keep in sync with --handle-h
 
 watch(
   () => store.route,
@@ -44,16 +45,77 @@ watch(
   },
 )
 
+// The sheet tracks the finger while dragging and snaps on release, judged by
+// flick velocity first and position second — the fixed-threshold swipe it
+// replaces ignored both, which is what made it feel non-native.
+const collapsedOffset = () => (panelEl.value?.offsetHeight ?? 0) - HANDLE_H
+let drag = null
+
 function onHandleTouchStart(e) {
-  touchStartY = e.touches[0].clientY
+  drag = {
+    startY: e.touches[0].clientY,
+    base: collapsed.value ? collapsedOffset() : 0,
+    offset: null,
+    lastY: e.touches[0].clientY,
+    lastT: performance.now(),
+    velocity: 0,
+  }
+  panelEl.value.classList.add('dragging')
+}
+
+function onHandleTouchMove(e) {
+  if (!drag) return
+  const y = e.touches[0].clientY
+  const now = performance.now()
+  if (now > drag.lastT) drag.velocity = (y - drag.lastY) / (now - drag.lastT)
+  drag.lastY = y
+  drag.lastT = now
+
+  const max = collapsedOffset()
+  let offset = drag.base + (y - drag.startY)
+  // Rubber-band past the ends instead of stopping dead.
+  if (offset < 0) offset *= 0.18
+  else if (offset > max) offset = max + (offset - max) * 0.18
+  drag.offset = offset
+  panelEl.value.style.transform = `translateY(${offset}px)`
 }
 
 function onHandleTouchEnd(e) {
-  if (touchStartY == null) return
-  const dy = e.changedTouches[0].clientY - touchStartY
-  touchStartY = null
-  if (Math.abs(dy) > 24) collapsed.value = dy > 0
+  if (!drag) return
+  const d = drag
+  drag = null
+  panelEl.value.classList.remove('dragging')
+  panelEl.value.style.transform = ''
+  // Barely moved: it's a tap, and the click handler will toggle.
+  if (d.offset == null || Math.abs(d.lastY - d.startY) < 6) return
+  e.preventDefault() // a real drag must not also fire the click toggle
+  collapsed.value =
+    Math.abs(d.velocity) > 0.35 ? d.velocity > 0 : d.offset > collapsedOffset() / 2
 }
+
+// Tell the map how much of the viewport the sheet is covering, so it can
+// centre things in the strip that stays visible.
+function publishInset() {
+  if (!isMobile()) {
+    store.sheetInset = 0
+    return
+  }
+  store.sheetInset = collapsed.value
+    ? HANDLE_H
+    : (panelEl.value?.offsetHeight ?? HANDLE_H)
+}
+
+watch(collapsed, publishInset)
+let insetObserver = null
+onMounted(() => {
+  publishInset()
+  insetObserver = new ResizeObserver(publishInset)
+  insetObserver.observe(panelEl.value)
+})
+onBeforeUnmount(() => {
+  insetObserver?.disconnect()
+  store.sheetInset = 0
+})
 
 watch(query, (q) => {
   clearTimeout(debounceTimer)
@@ -150,7 +212,7 @@ const routeStats = computed(() => {
 </script>
 
 <template>
-  <section class="panel" :class="{ collapsed }" aria-label="Route planner">
+  <section ref="panelEl" class="panel" :class="{ collapsed }" aria-label="Route planner">
     <div class="sheet-top">
       <button
         class="sheet-handle"
@@ -158,7 +220,9 @@ const routeStats = computed(() => {
         :aria-label="t('panelToggle')"
         @click="collapsed = !collapsed"
         @touchstart.passive="onHandleTouchStart"
+        @touchmove.passive="onHandleTouchMove"
         @touchend="onHandleTouchEnd"
+        @touchcancel="onHandleTouchEnd"
       >
         <span class="grabber" aria-hidden="true"></span>
         <span v-if="collapsed && routeStats" class="mini-stats">
@@ -461,6 +525,11 @@ const routeStats = computed(() => {
 
   .panel.collapsed {
     transform: translateY(calc(100% - var(--handle-h)));
+  }
+
+  /* While a finger holds the sheet, it must sit exactly under it. */
+  .panel.dragging {
+    transition: none;
   }
 
   .sheet-body {
