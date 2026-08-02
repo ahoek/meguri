@@ -1,3 +1,4 @@
+import { ref, watch } from 'vue'
 import { locale, t } from '../i18n.js'
 
 // Announce each maneuver at most once per band. Ascending order matters:
@@ -17,6 +18,64 @@ let spokenFor = new Map() // maneuver key → smallest threshold already said
 let saidArrived = false
 let saidOffRoute = false
 let unlocked = false
+
+// ---- voice choice ----
+// The browser usually offers several voices per language; remember one per
+// app language. Voices load asynchronously (empty list until voiceschanged).
+const VOICE_CHOICE_KEY = 'meguri-voice-choice'
+
+function loadVoiceChoices() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VOICE_CHOICE_KEY))
+    return saved && typeof saved === 'object' ? saved : {}
+  } catch {
+    return {}
+  }
+}
+
+/** voiceURI per app language, e.g. { nl: '…Xander…' }. Empty = automatic. */
+export const voiceChoice = ref(loadVoiceChoices())
+
+/** Voices the browser offers for the current app language. */
+export const availableVoices = ref([])
+
+function refreshVoices() {
+  const synth = window.speechSynthesis
+  if (!synth) return
+  availableVoices.value = synth
+    .getVoices()
+    .filter((v) => v.lang?.toLowerCase().startsWith(locale.value))
+}
+
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  refreshVoices() // often empty on first call — that call starts the loading
+  window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices)
+  watch(locale, refreshVoices)
+}
+
+export function setChosenVoice(uri) {
+  const next = { ...voiceChoice.value }
+  if (uri) next[locale.value] = uri
+  else delete next[locale.value]
+  voiceChoice.value = next
+  try {
+    localStorage.setItem(VOICE_CHOICE_KEY, JSON.stringify(next))
+  } catch {
+    /* storage blocked — the choice just won't persist */
+  }
+  // Hearing the voice is the only way to judge it — and choosing is a
+  // gesture, so this also unlocks iOS speech.
+  unlocked = true
+  say(t('voiceSample'))
+}
+
+function pickVoice() {
+  const uri = voiceChoice.value[locale.value]
+  if (!uri) return null
+  return (
+    window.speechSynthesis.getVoices().find((v) => v.voiceURI === uri) ?? null
+  )
+}
 
 /**
  * iOS Safari refuses to speak unless the very first utterance happens inside
@@ -51,6 +110,8 @@ function say(text) {
   if (!synth) return
   const utterance = new SpeechSynthesisUtterance(text)
   utterance.lang = VOICE_LANG[locale.value] ?? 'en-GB'
+  const voice = pickVoice()
+  if (voice) utterance.voice = voice // lang above stays as the fallback
   utterance.rate = 1.05
   // iOS parks the queue when the screen locks or the tab backgrounds, and
   // never restarts it on its own.
