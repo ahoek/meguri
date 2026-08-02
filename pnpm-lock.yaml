@@ -39,6 +39,9 @@ importers:
       vue-tsc:
         specifier: ^3.3.9
         version: 3.3.9(typescript@5.9.3)
+      workbox-window:
+        specifier: ^7.4.1
+        version: 7.4.1
 
 packages:
 

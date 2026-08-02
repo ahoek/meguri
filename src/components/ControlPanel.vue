@@ -16,6 +16,7 @@ import { searchPlaces } from '../infra/nominatim'
 import { downloadGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
 import { primeSpeech } from '../app/guidance'
+import { checkForUpdates } from '../infra/pwa'
 import { LOCALES, locale, setLocale, t } from '../i18n'
 import type { PlaceResult } from '../infra/nominatim'
 import { localNumber } from '../domain/format'
@@ -236,6 +237,25 @@ const wpHint = computed(() => {
 
 // So an installed PWA can be checked against the latest deploy.
 const build = __BUILD__
+
+// Manual update check. Finding one activates the new service worker, which
+// reloads the page by itself — so quietly coming back means we're current.
+const updateState = ref<'idle' | 'checking' | 'current'>('idle')
+
+async function onCheckUpdates() {
+  if (updateState.value === 'checking') return
+  updateState.value = 'checking'
+  try {
+    await checkForUpdates()
+  } catch {
+    /* offline — nothing to report beyond "no update happened" */
+  }
+  // Give a found update a moment to install and take over (= reload).
+  setTimeout(() => {
+    updateState.value = 'current'
+    setTimeout(() => (updateState.value = 'idle'), 3000)
+  }, 1200)
+}
 
 const routeStats = computed(() => {
   if (!store.route) return null
@@ -513,7 +533,12 @@ const routeStats = computed(() => {
       </div>
     </Transition>
 
-    <p class="build-stamp">{{ build }}</p>
+    <p class="build-stamp">
+      {{ build }} ·
+      <button class="update-link" @click="onCheckUpdates">
+        {{ t(updateState === 'checking' ? 'updateChecking' : updateState === 'current' ? 'updateCurrent' : 'updateCheck') }}
+      </button>
+    </p>
     </div>
   </section>
 </template>
@@ -1299,6 +1324,13 @@ const routeStats = computed(() => {
   color: var(--ink-3);
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
+}
+
+.update-link {
+  font-size: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .rise-enter-active {
