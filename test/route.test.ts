@@ -121,10 +121,11 @@ describe('waypoints', () => {
     expect(requested[0]).toContainEqual(wp)
   })
 
-  // a nature reserve is reached down one access road and left the same way. The spur
-  // trimmer saw that as backtracking and cut it, so the loop rolled past on
-  // the through-road a hundred-odd metres short of the pin. A stop the rider
-  // asked for outranks both the length target and the no-backtracking rule.
+  // A nature reserve with one access road is reached and left the same way.
+  // The spur trimmer saw that as backtracking and cut it, so the loop rolled
+  // past on the through-road a hundred-odd metres short of the pin. A stop
+  // the rider asked for outranks the length target and the no-backtracking
+  // rule both.
   it('keeps the leg that reaches a stop, even though it doubles back', async () => {
     const b = offset(ORIGIN, 0, 100)
     const tip = offset(b, 60, 0) // down a dead end

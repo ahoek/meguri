@@ -6,6 +6,8 @@ import type { Route, VoiceHint } from '../src/domain/route'
 export const M_PER_DEG_LNG = 68000
 export const M_PER_DEG_LAT = 111000
 
+// The map's default centre — a public square, deliberately nobody's doorstep.
+// Any point near 52°N does; the constants above are calibrated for it.
 export const ORIGIN: LngLat = [4.8945, 52.3667] // Amsterdam
 
 /** Offset a point by metres east and north. */

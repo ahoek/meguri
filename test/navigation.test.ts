@@ -70,7 +70,13 @@ describe('locating on the route', () => {
     const p = prepareRoute(squareLoop())
     const target = p.totalKm * 0.5
     const fix = locateInitial(p, positionAtKm(p, target).position)
-    expect(fix.alongKm).toBeCloseTo(target, 2)
+
+    // Candidates within TIE_M of the best resolve to the earliest, so the
+    // answer may sit up to 20 m back down the road — that is the rule doing
+    // its job. What must not happen is being dragged to the start, or
+    // snapped to the finish that sits on top of it.
+    expect(fix.alongKm).toBeGreaterThan(target - 0.025)
+    expect(fix.alongKm).toBeLessThanOrEqual(target + 0.005)
   })
 
   it('reports how far off the line you are', () => {
