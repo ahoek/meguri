@@ -176,9 +176,19 @@ const sliderValue = computed({
   },
 })
 
-const sliderFill = computed(() => {
-  const { min, max } = range.value
-  return ((sliderValue.value - min) / (max - min)) * 100
+// The slider runs on a log scale: a short stroll and a 40 km hike are both
+// on it, but the short distances are picked far more often, so they get the
+// travel. The thumb position is 0–100; values snap to the range's step.
+const sliderPos = computed({
+  get: () => {
+    const { min, max } = range.value
+    return (Math.log(sliderValue.value / min) / Math.log(max / min)) * 100
+  },
+  set: (p) => {
+    const { min, max, step } = range.value
+    const raw = min * Math.pow(max / min, Number(p) / 100)
+    sliderValue.value = Math.min(max, Math.max(min, Math.round(raw / step) * step))
+  },
 })
 
 function formatMinutes(min: number) {
@@ -428,14 +438,15 @@ const routeStats = computed(() => {
       </div>
       <input
         id="target-slider"
-        v-model="sliderValue"
+        v-model="sliderPos"
         class="slider"
         type="range"
-        :min="range.min"
-        :max="range.max"
-        :step="range.step"
-        :style="{ '--fill': sliderFill + '%' }"
+        min="0"
+        max="100"
+        step="0.1"
+        :style="{ '--fill': sliderPos + '%' }"
         :aria-label="store.targetType === 'distance' ? t('distanceAria') : t('durationAria')"
+        :aria-valuetext="targetLabel"
       />
     </div>
 
