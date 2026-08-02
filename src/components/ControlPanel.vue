@@ -16,6 +16,7 @@ import { downloadGpx } from '../lib/gpx.js'
 import { startNavigation } from '../lib/nav-session.js'
 import { primeSpeech } from '../lib/speech.js'
 import { LOCALES, locale, setLocale, t } from '../i18n.js'
+import { localNumber } from '../lib/format.js'
 
 const query = ref('')
 const results = ref([])
@@ -121,7 +122,7 @@ const targetLabel = computed(() =>
 )
 
 const targetHint = computed(() => {
-  if (store.targetType !== 'distance') return `≈ ${targetKm().toFixed(1)} km`
+  if (store.targetType !== 'distance') return `≈ ${localNumber(targetKm(), 1)} km`
   const duration = formatMinutes((store.km[store.mode] / SPEEDS[store.mode]) * 60)
   const mode = store.mode === 'bike' ? t('approxRide') : t('approxWalk')
   return locale.value === 'ja'
@@ -142,7 +143,7 @@ function onStartNavigation() {
 const routeStats = computed(() => {
   if (!store.route) return null
   return {
-    distance: `${store.route.distanceKm.toFixed(1)} km`,
+    distance: `${localNumber(store.route.distanceKm, 1)} km`,
     duration: formatMinutes(store.route.durationSec / 60),
   }
 })

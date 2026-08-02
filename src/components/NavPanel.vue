@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { nav, stopNavigation, setVoice } from '../lib/nav-session.js'
 import { primeSpeech } from '../lib/speech.js'
 import { locale, t } from '../i18n.js'
+import { localNumber } from '../lib/format.js'
 
 const emit = defineEmits(['recenter'])
 
@@ -41,7 +42,7 @@ const kind = computed(() => nav.maneuver?.kind ?? 'continue')
 
 function formatDistance(metres) {
   if (metres == null) return ''
-  if (metres >= 1000) return `${(metres / 1000).toFixed(1)} km`
+  if (metres >= 1000) return `${localNumber(metres / 1000, 1)} km`
   if (metres >= 100) return `${Math.round(metres / 10) * 10} m`
   return `${Math.max(0, Math.round(metres / 5) * 5)} m`
 }
@@ -55,7 +56,7 @@ const maneuverDistance = computed(() => {
 
 const remaining = computed(() => {
   const km = nav.remainingKm
-  return km >= 10 ? `${km.toFixed(0)} km` : `${km.toFixed(1)} km`
+  return km >= 10 ? `${localNumber(km)} km` : `${localNumber(km, 1)} km`
 })
 
 const eta = computed(() => {
