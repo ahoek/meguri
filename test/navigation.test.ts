@@ -7,8 +7,8 @@ import {
   locateInitial,
   locateOnRoute,
   nextManeuver,
-} from '../src/lib/navigation.js'
-import { ORIGIN, offset, metresBetween, routeFrom, squareLoop } from './helpers.js'
+} from '../src/lib/navigation'
+import { ORIGIN, offset, metresBetween, routeFrom, squareLoop } from './helpers'
 
 const northThenEast = () =>
   prepareRoute(routeFrom([{ north: 200 }, { east: 200 }]))
@@ -102,7 +102,7 @@ describe('locating on the route', () => {
 })
 
 describe('maneuvers', () => {
-  const withHints = (hints) =>
+  const withHints = (hints: number[][]) =>
     prepareRoute(
       routeFrom([{ north: 100 }, { north: 100 }, { north: 100 }, { north: 100 }], {
         voicehints: hints,

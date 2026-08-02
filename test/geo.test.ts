@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { loopViaWithWaypoints, bearingBetween } from '../src/lib/geo.js'
-import { ORIGIN, offset } from './helpers.js'
+import { loopViaWithWaypoints, bearingBetween } from '../src/lib/geo'
+import { ORIGIN, offset } from './helpers'
 
 describe('loopViaWithWaypoints', () => {
   const east = offset(ORIGIN, 2000, 0)
   const north = offset(ORIGIN, 0, 2000)
-  const centroid = [
+  const centroid: [number, number] = [
     (ORIGIN[0] + east[0] + north[0]) / 3,
     (ORIGIN[1] + east[1] + north[1]) / 3,
   ]

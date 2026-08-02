@@ -1,4 +1,17 @@
-import { loopViaPoints, loopViaWithWaypoints, distanceKm } from './geo.js'
+import { loopViaPoints, loopViaWithWaypoints, distanceKm } from './geo'
+import type { LngLat } from './geo'
+
+// [pointIndex, command, exitNumber, distanceToNext, angle] per maneuver.
+export type VoiceHint = number[]
+
+export interface Route {
+  geometry: { type: string; coordinates: LngLat[] }
+  distanceKm: number
+  durationSec: number
+  voicehints: VoiceHint[]
+}
+
+export type Profile = 'walk' | 'bike'
 import bikeNatureProfile from '../profiles/bike-nature.brf?raw'
 import walkNatureProfile from '../profiles/walk-nature.brf?raw'
 
@@ -11,17 +24,17 @@ const PROFILE = { walk: 'hiking-beta', bike: 'trekking' }
 // estimates switched on, so green detours beat the direct route through town.
 // They must be registered with the server, which hands back a temporary id.
 const NATURE_SOURCE = { walk: walkNatureProfile, bike: bikeNatureProfile }
-const natureIds = {}
+const natureIds: Partial<Record<Profile, string>> = {}
 
 // Bump whenever a .brf changes, so clients stop reusing the id of the
 // profile they registered from the previous version.
 const PROFILE_VERSION = 3
 
-function cacheKey(mode) {
+function cacheKey(mode: Profile) {
   return `meguri-profile-${mode}-v${PROFILE_VERSION}`
 }
 
-async function registerNatureProfile(mode, signal) {
+async function registerNatureProfile(mode: Profile, signal?: AbortSignal) {
   const res = await fetch(`${BROUTER}/profile`, {
     method: 'POST',
     body: NATURE_SOURCE[mode],
@@ -39,7 +52,7 @@ async function registerNatureProfile(mode, signal) {
   return profileid
 }
 
-async function natureProfileId(mode, signal) {
+async function natureProfileId(mode: Profile, signal?: AbortSignal) {
   if (natureIds[mode]) return natureIds[mode]
   const cached = localStorage.getItem(cacheKey(mode))
   if (cached) {
@@ -49,7 +62,11 @@ async function natureProfileId(mode, signal) {
   return registerNatureProfile(mode, signal)
 }
 
-async function requestRoute(points, profileName, signal) {
+async function requestRoute(
+  points: LngLat[],
+  profileName: string,
+  signal?: AbortSignal,
+): Promise<Route> {
   const lonlats = points
     .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
     .join('|')
@@ -70,16 +87,21 @@ async function requestRoute(points, profileName, signal) {
   }
 }
 
-const reRegistered = {}
+const reRegistered: Partial<Record<Profile, boolean>> = {}
 
-async function fetchRoute(points, mode, nature, signal) {
+async function fetchRoute(
+  points: LngLat[],
+  mode: Profile,
+  nature: boolean,
+  signal?: AbortSignal,
+): Promise<Route> {
   if (!nature) return requestRoute(points, PROFILE[mode], signal)
 
   const id = await natureProfileId(mode, signal)
   try {
     return await requestRoute(points, id, signal)
   } catch (err) {
-    if (err.name === 'AbortError' || reRegistered[mode]) throw err
+    if ((err as Error).name === 'AbortError' || reRegistered[mode]) throw err
     // The server drops custom profiles after a while — register again once,
     // then let any further failure surface so the caller can try new terrain.
     reRegistered[mode] = true
@@ -89,11 +111,21 @@ async function fetchRoute(points, mode, nature, signal) {
 }
 
 /** Route directly between waypoints — used to guide back after a wrong turn. */
-export async function routeBetween({ points, profile, nature = true, signal }) {
+export async function routeBetween({
+  points,
+  profile,
+  nature = true,
+  signal,
+}: {
+  points: LngLat[]
+  profile: Profile
+  nature?: boolean
+  signal?: AbortSignal
+}): Promise<Route> {
   return fetchRoute(points, profile, nature, signal)
 }
 
-const samePoint = (a, b) => a[0] === b[0] && a[1] === b[1]
+const samePoint = (a: LngLat, b: LngLat) => a[0] === b[0] && a[1] === b[1]
 
 /**
  * Remove out-and-back spurs (A → T → A dead-end tips). The loop stays intact
@@ -102,14 +134,14 @@ const samePoint = (a, b) => a[0] === b[0] && a[1] === b[1]
  * Returns the trimmed points plus `origin`, mapping each surviving point back
  * to its index in the input, so turn instructions can be re-indexed.
  */
-function trimSpurs(coords) {
+function trimSpurs(coords: LngLat[]) {
   let pts = coords
   let origin = coords.map((_, i) => i)
   let changed = true
   while (changed) {
     changed = false
-    const out = [pts[0]]
-    const outOrigin = [origin[0]]
+    const out: LngLat[] = [pts[0]]
+    const outOrigin: number[] = [origin[0]]
     for (let i = 1; i < pts.length; i++) {
       const prev = out[out.length - 1]
       if (samePoint(pts[i], prev)) {
@@ -132,11 +164,11 @@ function trimSpurs(coords) {
 }
 
 /** Fraction of the track that runs over the same street twice. */
-function overlapFraction(coords) {
-  const seen = new Set()
+function overlapFraction(coords: LngLat[]) {
+  const seen = new Set<string>()
   let total = 0
   let repeated = 0
-  const key = (p) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`
+  const key = (p: LngLat) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`
   for (let i = 1; i < coords.length; i++) {
     const len = distanceKm(coords[i - 1], coords[i])
     total += len
@@ -147,7 +179,7 @@ function overlapFraction(coords) {
   return total ? repeated / total : 0
 }
 
-function polylineKm(coords) {
+function polylineKm(coords: LngLat[]) {
   let total = 0
   for (let i = 1; i < coords.length; i++) {
     total += distanceKm(coords[i - 1], coords[i])
@@ -176,24 +208,33 @@ export async function generateLoop({
   clockwise,
   waypoints = [],
   signal,
-}) {
+}: {
+  start: LngLat
+  targetKm: number
+  profile: Profile
+  nature?: boolean
+  bearing: number
+  clockwise: boolean
+  waypoints?: LngLat[]
+  signal?: AbortSignal
+}): Promise<Route> {
   let radius = Math.max(0.12, targetKm / (2 * Math.PI))
   let currentBearing = bearing
   let viaCount = 4
-  let best = null
+  let best: Route | null = null
   let bestScore = Infinity
-  let lastError = null
+  let lastError: unknown = null
 
   for (let attempt = 0; attempt < 7; attempt++) {
     const via = waypoints.length
       ? loopViaWithWaypoints(start, waypoints, radius, currentBearing, clockwise, viaCount)
       : loopViaPoints(start, radius, currentBearing, clockwise, viaCount)
 
-    let route
+    let route: Route
     try {
       route = await fetchRoute([start, ...via, start], profile, nature, signal)
     } catch (err) {
-      if (err.name === 'AbortError') throw err
+      if ((err as Error).name === 'AbortError') throw err
       // A via-point landed somewhere unroutable (water, private land).
       // Keep whatever we already have and swing the circle elsewhere.
       lastError = err
@@ -213,7 +254,7 @@ export async function generateLoop({
       const newIndexOf = new Map(origin.map((old, next) => [old, next]))
       route.voicehints = route.voicehints
         .filter((h) => newIndexOf.has(h[0]))
-        .map((h) => [newIndexOf.get(h[0]), ...h.slice(1)])
+        .map((h) => [newIndexOf.get(h[0])!, ...h.slice(1)])
     }
 
     const distErr = Math.abs(route.distanceKm - targetKm) / targetKm
@@ -255,6 +296,6 @@ export async function generateLoop({
     radius = Math.min(Math.max(radius / ratio, radius * 0.45), radius * 2.2)
   }
 
-  if (!best) throw lastError ?? new Error('No route found')
+  if (!best) throw (lastError as Error) ?? new Error('No route found')
   return best
 }

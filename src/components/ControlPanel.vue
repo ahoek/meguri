@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   store,
@@ -11,30 +11,31 @@ import {
   generate,
   showError,
   clearWaypoints,
-} from '../store.js'
-import { searchPlaces } from '../lib/geocode.js'
-import { downloadGpx } from '../lib/gpx.js'
-import { startNavigation } from '../lib/nav-session.js'
+} from '../store'
+import { searchPlaces } from '../lib/geocode'
+import { downloadGpx } from '../lib/gpx'
+import { startNavigation } from '../lib/nav-session'
 import {
   primeSpeech,
   availableVoices,
   voiceChoice,
   setChosenVoice,
-} from '../lib/speech.js'
-import { LOCALES, locale, setLocale, t } from '../i18n.js'
-import { localNumber } from '../lib/format.js'
+} from '../lib/speech'
+import { LOCALES, locale, setLocale, t } from '../i18n'
+import type { PlaceResult } from '../lib/geocode'
+import { localNumber } from '../lib/format'
 
 const query = ref('')
-const results = ref([])
+const results = ref<PlaceResult[]>([])
 const searching = ref(false)
 const listOpen = ref(false)
-let debounceTimer = null
-let searchAbort = null
+let debounceTimer: ReturnType<typeof setTimeout> | undefined
+let searchAbort: AbortController | null = null
 
 // Mobile bottom sheet: collapse to a slim bar so the route stays visible.
 const collapsed = ref(false)
 const isMobile = () => matchMedia('(max-width: 760px)').matches
-const panelEl = ref(null)
+const panelEl = ref<HTMLElement | null>(null)
 const HANDLE_H = 58 // keep in sync with --handle-h
 
 watch(
@@ -55,9 +56,18 @@ watch(
 // flick velocity first and position second — the fixed-threshold swipe it
 // replaces ignored both, which is what made it feel non-native.
 const collapsedOffset = () => (panelEl.value?.offsetHeight ?? 0) - HANDLE_H
-let drag = null
 
-function onHandleTouchStart(e) {
+interface SheetDrag {
+  startY: number
+  base: number
+  offset: number | null
+  lastY: number
+  lastT: number
+  velocity: number
+}
+let drag: SheetDrag | null = null
+
+function onHandleTouchStart(e: TouchEvent) {
   drag = {
     startY: e.touches[0].clientY,
     base: collapsed.value ? collapsedOffset() : 0,
@@ -66,10 +76,10 @@ function onHandleTouchStart(e) {
     lastT: performance.now(),
     velocity: 0,
   }
-  panelEl.value.classList.add('dragging')
+  panelEl.value?.classList.add('dragging')
 }
 
-function onHandleTouchMove(e) {
+function onHandleTouchMove(e: TouchEvent) {
   if (!drag) return
   const y = e.touches[0].clientY
   const now = performance.now()
@@ -83,15 +93,15 @@ function onHandleTouchMove(e) {
   if (offset < 0) offset *= 0.18
   else if (offset > max) offset = max + (offset - max) * 0.18
   drag.offset = offset
-  panelEl.value.style.transform = `translateY(${offset}px)`
+  if (panelEl.value) panelEl.value.style.transform = `translateY(${offset}px)`
 }
 
-function onHandleTouchEnd(e) {
+function onHandleTouchEnd(e: TouchEvent) {
   if (!drag) return
   const d = drag
   drag = null
-  panelEl.value.classList.remove('dragging')
-  panelEl.value.style.transform = ''
+  panelEl.value?.classList.remove('dragging')
+  if (panelEl.value) panelEl.value.style.transform = ''
   // Barely moved: it's a tap, and the click handler will toggle.
   if (d.offset == null || Math.abs(d.lastY - d.startY) < 6) return
   e.preventDefault() // a real drag must not also fire the click toggle
@@ -112,11 +122,11 @@ function publishInset() {
 }
 
 watch(collapsed, publishInset)
-let insetObserver = null
+let insetObserver: ResizeObserver | null = null
 onMounted(() => {
   publishInset()
   insetObserver = new ResizeObserver(publishInset)
-  insetObserver.observe(panelEl.value)
+  if (panelEl.value) insetObserver.observe(panelEl.value)
 })
 onBeforeUnmount(() => {
   insetObserver?.disconnect()
@@ -145,7 +155,7 @@ watch(query, (q) => {
   }, 350)
 })
 
-function pickResult(result) {
+function pickResult(result: PlaceResult) {
   listOpen.value = false
   query.value = ''
   results.value = []
@@ -173,7 +183,7 @@ const sliderFill = computed(() => {
   return ((sliderValue.value - min) / (max - min)) * 100
 })
 
-function formatMinutes(min) {
+function formatMinutes(min: number) {
   const h = Math.floor(min / 60)
   const m = Math.round(min % 60)
   const sp = locale.value === 'ja' ? '' : ' ' // Japanese sets no space before units
@@ -390,7 +400,7 @@ const routeStats = computed(() => {
           type="checkbox"
           role="switch"
           :checked="store.waypointMode"
-          @change="store.waypointMode = $event.target.checked"
+          @change="store.waypointMode = ($event.target as HTMLInputElement).checked"
         />
       </label>
     </div>
@@ -454,7 +464,7 @@ const routeStats = computed(() => {
         type="checkbox"
         role="switch"
         :checked="store.nature"
-        @change="setNature($event.target.checked)"
+        @change="setNature(($event.target as HTMLInputElement).checked)"
       />
     </label>
 
@@ -468,7 +478,7 @@ const routeStats = computed(() => {
         class="voice-select"
         :value="chosenVoiceURI"
         :aria-label="t('voiceLabel')"
-        @change="setChosenVoice($event.target.value)"
+        @change="setChosenVoice(($event.target as HTMLSelectElement).value)"
       >
         <option value="">{{ t('voiceAuto') }}</option>
         <option v-for="v in availableVoices" :key="v.voiceURI" :value="v.voiceURI">
@@ -506,7 +516,7 @@ const routeStats = computed(() => {
             </svg>
             {{ t('surpriseMe') }}
           </button>
-          <button class="ghost-btn" @click="downloadGpx(store.route, store.mode)">
+          <button class="ghost-btn" @click="downloadGpx(store.route!, store.mode)">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>

@@ -1,14 +1,14 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
-import { nav, stopNavigation, setVoice } from '../lib/nav-session.js'
-import { primeSpeech } from '../lib/speech.js'
-import { locale, t } from '../i18n.js'
-import { localNumber } from '../lib/format.js'
+import { nav, stopNavigation, setVoice } from '../lib/nav-session'
+import { primeSpeech } from '../lib/speech'
+import { locale, t } from '../i18n'
+import { localNumber } from '../lib/format'
 
 const emit = defineEmits(['recenter'])
 
 // Mirrored horizontally for the right-hand variants.
-const TURN_PATHS = {
+const TURN_PATHS: Record<string, string> = {
   left: 'M17 20V11a4 4 0 0 0-4-4H8',
   right: 'M7 20v-9a4 4 0 0 1 4-4h5',
   slightLeft: 'M16 20v-6.2a4 4 0 0 0-1.2-2.9L10 6.5',
@@ -23,7 +23,7 @@ const TURN_PATHS = {
   finish: 'M12 20V6',
 }
 
-const ARROW_HEAD = {
+const ARROW_HEAD: Record<string, string> = {
   left: 'm11 4-3 3 3 3',
   right: 'm13 4 3 3-3 3',
   slightLeft: 'm13 6.5-3 0 0 3',
@@ -40,7 +40,7 @@ const ARROW_HEAD = {
 
 const kind = computed(() => nav.maneuver?.kind ?? 'continue')
 
-function formatDistance(metres) {
+function formatDistance(metres: number | null) {
   if (metres == null) return ''
   if (metres >= 1000) return `${localNumber(metres / 1000, 1)} km`
   if (metres >= 100) return `${Math.round(metres / 10) * 10} m`

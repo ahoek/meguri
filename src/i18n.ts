@@ -1,6 +1,8 @@
 import { ref } from 'vue'
 
-const messages = {
+export type Locale = 'en' | 'nl' | 'ja'
+
+const messages: Record<Locale, Record<string, string>> = {
   en: {
     tagline: 'Loops made for wandering',
     walk: 'Walk',
@@ -225,25 +227,25 @@ const messages = {
   },
 }
 
-export const LOCALES = ['en', 'nl', 'ja']
+export const LOCALES: Locale[] = ['en', 'nl', 'ja']
 
 const STORAGE_KEY = 'meguri-locale'
 
-function detectLocale() {
+function detectLocale(): Locale {
   const saved = localStorage.getItem(STORAGE_KEY)
-  if (LOCALES.includes(saved)) return saved
+  if (LOCALES.includes(saved as Locale)) return saved as Locale
   const browser = navigator.language?.toLowerCase() ?? ''
   return LOCALES.find((code) => browser.startsWith(code)) ?? 'en'
 }
 
 export const locale = ref(detectLocale())
 
-export function setLocale(value) {
+export function setLocale(value: Locale) {
   locale.value = value
   localStorage.setItem(STORAGE_KEY, value)
   document.documentElement.lang = value
 }
 
-export function t(key) {
+export function t(key: string): string {
   return messages[locale.value]?.[key] ?? messages.en[key] ?? key
 }

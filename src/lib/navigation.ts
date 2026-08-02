@@ -1,7 +1,31 @@
-import { distanceKm } from './geo.js'
+import { distanceKm } from './geo'
+import type { LngLat } from './geo'
+import type { Route } from './route'
+
+export interface Maneuver {
+  index: number
+  kind: string
+  exit: number
+  angle: number
+  atKm: number
+}
+
+export interface PreparedRoute {
+  coords: LngLat[]
+  cumulative: number[]
+  totalKm: number
+  maneuvers: Maneuver[]
+}
+
+interface RouteFix {
+  index: number
+  snapped: LngLat
+  alongKm: number
+  offRouteM: number
+}
 
 // BRouter voice-hint command codes.
-export const MANEUVER = {
+export const MANEUVER: Record<number, string> = {
   1: 'continue',
   2: 'left',
   3: 'slightLeft',
@@ -20,18 +44,18 @@ export const MANEUVER = {
 
 const GENTLE_ANGLE = 18 // degrees; below this a "slight" turn is just a curve
 
-function isGentleBend(maneuver) {
+function isGentleBend(maneuver: Maneuver) {
   return (
     (maneuver.kind === 'slightLeft' || maneuver.kind === 'slightRight') &&
     Math.abs(maneuver.angle) < GENTLE_ANGLE
   )
 }
 
-const rad = (d) => (d * Math.PI) / 180
-const deg = (r) => (r * 180) / Math.PI
+const rad = (d: number) => (d * Math.PI) / 180
+const deg = (r: number) => (r * 180) / Math.PI
 
 /** Initial bearing in degrees from a to b. */
-export function bearingBetween([lng1, lat1], [lng2, lat2]) {
+export function bearingBetween([lng1, lat1]: LngLat, [lng2, lat2]: LngLat): number {
   const φ1 = rad(lat1)
   const φ2 = rad(lat2)
   const Δλ = rad(lng2 - lng1)
@@ -45,16 +69,16 @@ export function bearingBetween([lng1, lat1], [lng2, lat2]) {
  * Precompute everything navigation needs from a generated route: cumulative
  * distance at each vertex and a maneuver list positioned along the line.
  */
-export function prepareRoute(route) {
+export function prepareRoute(route: Route): PreparedRoute {
   const coords = route.geometry.coordinates
-  const cumulative = new Array(coords.length)
+  const cumulative: number[] = new Array(coords.length)
   cumulative[0] = 0
   for (let i = 1; i < coords.length; i++) {
     cumulative[i] = cumulative[i - 1] + distanceKm(coords[i - 1], coords[i])
   }
   const totalKm = cumulative[cumulative.length - 1]
 
-  const maneuvers = (route.voicehints ?? [])
+  const maneuvers: Maneuver[] = (route.voicehints ?? [])
     .filter(([index, command]) => MANEUVER[command] && index < coords.length)
     .map(([index, command, exit, , angle]) => ({
       index,
@@ -90,7 +114,7 @@ const TIE_M = 20 // candidates this close to the best are treated as equal
  */
 const AT_START_M = 90
 
-export function locateInitial(prepared, position) {
+export function locateInitial(prepared: PreparedRoute, position: LngLat): RouteFix {
   const { coords, cumulative } = prepared
 
   // Navigation starts where the loop starts. If we're anywhere near that
@@ -100,7 +124,7 @@ export function locateInitial(prepared, position) {
     return { index: 0, snapped: coords[0], alongKm: 0, offRouteM: 0 }
   }
 
-  let best = null
+  let best: { d: number; index: number; snapped: LngLat; alongKm: number } | null = null
 
   for (let i = 0; i < coords.length - 1; i++) {
     const { point, t } = projectOnSegment(coords[i], coords[i + 1], position)
@@ -116,14 +140,18 @@ export function locateInitial(prepared, position) {
   }
 
   return {
-    index: best.index,
-    snapped: best.snapped,
-    alongKm: best.alongKm,
-    offRouteM: best.d,
+    index: best!.index,
+    snapped: best!.snapped,
+    alongKm: best!.alongKm,
+    offRouteM: best!.d,
   }
 }
 
-export function locateOnRoute(prepared, position, fromIndex = 0) {
+export function locateOnRoute(
+  prepared: PreparedRoute,
+  position: LngLat,
+  fromIndex = 0,
+): RouteFix {
   const { coords } = prepared
   // Search a window ahead of where we were, so a loop passing near itself
   // can't teleport progress onto the wrong lap.
@@ -140,7 +168,12 @@ export function locateOnRoute(prepared, position, fromIndex = 0) {
   return full.offRouteM < windowed.offRouteM ? full : windowed
 }
 
-function scan(prepared, position, start, end) {
+function scan(
+  prepared: PreparedRoute,
+  position: LngLat,
+  start: number,
+  end: number,
+): RouteFix {
   const { coords, cumulative } = prepared
   let bestDist = Infinity
   let bestIndex = start
@@ -167,7 +200,11 @@ function scan(prepared, position, start, end) {
 }
 
 /** Closest point on segment a→b to p, in flat local coordinates. */
-function projectOnSegment(a, b, p) {
+function projectOnSegment(
+  a: LngLat,
+  b: LngLat,
+  p: LngLat,
+): { point: LngLat; t: number } {
   // Scale longitude so a degree of each axis covers a similar distance.
   const k = Math.cos(rad(a[1])) || 1e-6
   const ax = a[0] * k
@@ -194,7 +231,10 @@ function projectOnSegment(a, b, p) {
  * The point `km` along the route, interpolated within its segment. Used to
  * carry the display forward between GPS fixes.
  */
-export function positionAtKm(prepared, km) {
+export function positionAtKm(
+  prepared: PreparedRoute,
+  km: number,
+): { position: LngLat; index: number } {
   const { coords, cumulative, totalKm } = prepared
   const target = Math.max(0, Math.min(km, totalKm))
 
@@ -225,7 +265,11 @@ export function positionAtKm(prepared, km) {
  * Distinct from bearingAlong(), which averages over a window and therefore
  * straddles both legs of a corner — giving a direction that matches neither.
  */
-export function segmentBearingAt(prepared, index, from = null) {
+export function segmentBearingAt(
+  prepared: PreparedRoute,
+  index: number,
+  from: LngLat | null = null,
+): number {
   const { coords, cumulative } = prepared
   const start = Math.max(0, Math.min(index, coords.length - 2))
   const origin = from ?? coords[start]
@@ -248,7 +292,7 @@ export function segmentBearingAt(prepared, index, from = null) {
 const HEADING_LOOKAHEAD_KM = 0.035
 
 /** Which way the route runs at `index`. */
-export function routeBearingAt(prepared, index) {
+export function routeBearingAt(prepared: PreparedRoute, index: number): number {
   return bearingAlong(prepared, prepared.cumulative[index] ?? 0)
 }
 
@@ -259,7 +303,11 @@ export function routeBearingAt(prepared, index) {
  * one so it turns into a corner as you reach it; the camera uses a longer one
  * so it holds the general direction and doesn't lurch at every bend.
  */
-export function bearingAlong(prepared, km, lookaheadKm = HEADING_LOOKAHEAD_KM) {
+export function bearingAlong(
+  prepared: PreparedRoute,
+  km: number,
+  lookaheadKm = HEADING_LOOKAHEAD_KM,
+): number {
   const here = positionAtKm(prepared, km)
   const ahead = positionAtKm(prepared, km + lookaheadKm)
   // At the very end there's nothing ahead to aim at; keep the last direction.
@@ -271,7 +319,10 @@ export function bearingAlong(prepared, km, lookaheadKm = HEADING_LOOKAHEAD_KM) {
 }
 
 /** The next maneuver at or after `alongKm`, with its distance in metres. */
-export function nextManeuver(prepared, alongKm) {
+export function nextManeuver(
+  prepared: PreparedRoute,
+  alongKm: number,
+): (Maneuver & { distanceM: number }) | null {
   const upcoming = prepared.maneuvers.find((m) => m.atKm > alongKm - 0.005)
   if (!upcoming) return null
   // The 5 m grace above can put the turn just behind us; never show negatives.
@@ -282,10 +333,18 @@ export function nextManeuver(prepared, alongKm) {
 }
 
 /** Slice the route ahead of the current position, for drawing. */
-export function remainingLine(prepared, index, snapped) {
+export function remainingLine(
+  prepared: PreparedRoute,
+  index: number,
+  snapped: LngLat,
+): LngLat[] {
   return [snapped, ...prepared.coords.slice(index + 1)]
 }
 
-export function traveledLine(prepared, index, snapped) {
+export function traveledLine(
+  prepared: PreparedRoute,
+  index: number,
+  snapped: LngLat,
+): LngLat[] {
   return [...prepared.coords.slice(0, index + 1), snapped]
 }

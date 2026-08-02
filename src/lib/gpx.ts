@@ -1,6 +1,7 @@
-import { t } from '../i18n.js'
+import { t } from '../i18n'
+import type { Route, Profile } from './route'
 
-export function downloadGpx(route, mode) {
+export function downloadGpx(route: Route, mode: Profile) {
   const points = route.geometry.coordinates
     .map(([lng, lat, ele]) => {
       const pos = `lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}"`

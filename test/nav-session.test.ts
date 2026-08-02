@@ -1,19 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { positionAtKm, prepareRoute } from '../src/lib/navigation.js'
-import { squareLoop, ORIGIN, offset } from './helpers.js'
+import { positionAtKm, prepareRoute } from '../src/lib/navigation'
+import { squareLoop, ORIGIN, offset } from './helpers'
+import type { LngLat } from '../src/lib/geo'
+import type { PreparedRoute } from '../src/lib/navigation'
+
+type NavModule = typeof import('../src/lib/nav-session')
+type FixCallback = (pos: {
+  timestamp: number
+  coords: {
+    longitude: number
+    latitude: number
+    accuracy: number
+    heading: number | null
+    speed: number | null
+  }
+}) => void
 
 // A controllable stand-in for the phone's GPS.
-let listener = null
+let listener: FixCallback | null = null
 let clock = 0
 
 function installGeolocation() {
   listener = null
   clock = Date.now()
-  globalThis.navigator ??= {}
+  ;(globalThis as any).navigator ??= {}
   Object.defineProperty(navigator, 'geolocation', {
     configurable: true,
     value: {
-      watchPosition: (ok) => {
+      watchPosition: (ok: FixCallback) => {
         listener = ok
         return 1
       },
@@ -26,7 +40,7 @@ function installGeolocation() {
 }
 
 /** Deliver a fix, advancing the clock by `afterSec`. */
-function fix(position, { speed = null, afterSec = 3 } = {}) {
+function fix(position: LngLat, { speed = null as number | null, afterSec = 3 } = {}) {
   clock += afterSec * 1000
   listener?.({
     timestamp: clock,
@@ -40,7 +54,9 @@ function fix(position, { speed = null, afterSec = 3 } = {}) {
   })
 }
 
-let nav, startNavigation, stopNavigation
+let nav: NavModule['nav']
+let startNavigation: NavModule['startNavigation']
+let stopNavigation: NavModule['stopNavigation']
 
 beforeEach(async () => {
   installGeolocation()
@@ -48,7 +64,7 @@ beforeEach(async () => {
   // tests are about the tracking decisions, not the network.
   vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
   vi.resetModules()
-  const mod = await import('../src/lib/nav-session.js')
+  const mod = await import('../src/lib/nav-session')
   nav = mod.nav
   startNavigation = mod.startNavigation
   stopNavigation = mod.stopNavigation
@@ -65,7 +81,7 @@ const loop = () => {
 }
 
 /** Ride to `km` along the route in realistic steps. */
-function rideTo(p, km, { speed = 5, stepKm = 0.015 } = {}) {
+function rideTo(p: PreparedRoute, km: number, { speed = 5, stepKm = 0.015 } = {}) {
   for (let at = nav.alongKm + stepKm; at <= km; at += stepKm) {
     fix(positionAtKm(p, at).position, { speed })
   }

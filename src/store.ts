@@ -1,12 +1,39 @@
 import { reactive, watch } from 'vue'
-import { generateLoop } from './lib/route.js'
-import { distanceKm } from './lib/geo.js'
-import { reverseGeocode } from './lib/geocode.js'
-import { locale } from './i18n.js'
-import { nav, startNavigation } from './lib/nav-session.js'
+import { generateLoop } from './lib/route'
+import { distanceKm } from './lib/geo'
+import { reverseGeocode } from './lib/geocode'
+import { locale } from './i18n'
+import { nav, startNavigation } from './lib/nav-session'
+import type { LngLat } from './lib/geo'
+import type { Route, Profile } from './lib/route'
 
-export const SPEEDS = { walk: 4.8, bike: 16 } // km/h, for time → distance
-export const RANGES = {
+export type TargetType = 'distance' | 'time'
+
+interface Start {
+  lngLat: LngLat
+  label: string
+}
+
+interface Store {
+  mode: Profile
+  start: Start | null
+  targetType: TargetType
+  km: Record<Profile, number>
+  minutes: Record<Profile, number>
+  nature: boolean
+  route: Route | null
+  busy: boolean
+  error: string
+  flyTo: { center: LngLat; zoom: number; id: number } | null
+  bearing: number
+  clockwise: boolean
+  sheetInset: number
+  waypoints: LngLat[]
+  waypointMode: boolean
+}
+
+export const SPEEDS: Record<Profile, number> = { walk: 4.8, bike: 16 } // km/h, for time → distance
+export const RANGES: Record<Profile, { km: { min: number; max: number; step: number }; min: { min: number; max: number; step: number } }> = {
   walk: { km: { min: 1, max: 40, step: 0.5 }, min: { min: 15, max: 360, step: 15 } },
   bike: { km: { min: 5, max: 120, step: 1 }, min: { min: 15, max: 360, step: 15 } },
 }
@@ -17,12 +44,13 @@ const ROUTE_KEY = 'meguri-route'
 const NAV_KEY = 'meguri-navigating'
 const WAYPOINTS_KEY = 'meguri-waypoints'
 
-function loadWaypoints() {
+function loadWaypoints(): LngLat[] {
   try {
-    const saved = JSON.parse(localStorage.getItem(WAYPOINTS_KEY))
+    const saved = JSON.parse(localStorage.getItem(WAYPOINTS_KEY) ?? 'null')
     if (Array.isArray(saved)) {
       return saved.filter(
-        (p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]),
+        (p: unknown): p is LngLat =>
+          Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]),
       )
     }
   } catch {
@@ -32,9 +60,9 @@ function loadWaypoints() {
 }
 
 /** The last generated route, so a refresh doesn't throw away your loop. */
-function loadSavedRoute() {
+function loadSavedRoute(): { route: Route } | null {
   try {
-    const saved = JSON.parse(localStorage.getItem(ROUTE_KEY))
+    const saved = JSON.parse(localStorage.getItem(ROUTE_KEY) ?? 'null')
     if (saved?.route?.geometry?.coordinates?.length > 1) return saved
   } catch {
     /* corrupt — fall through to a clean start */
@@ -42,16 +70,23 @@ function loadSavedRoute() {
   return null
 }
 
+interface Prefs {
+  mode: Profile
+  targetType: TargetType
+  km: Record<Profile, number>
+  minutes: Record<Profile, number>
+}
+
 /** Planner settings from the previous session: mode, target type and lengths. */
-function loadPrefs() {
-  const fallback = {
+function loadPrefs(): Prefs {
+  const fallback: Prefs = {
     mode: 'walk',
     targetType: 'distance',
     km: { walk: 5, bike: 25 },
     minutes: { walk: 60, bike: 90 },
   }
   try {
-    const saved = JSON.parse(localStorage.getItem(PREFS_KEY))
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? 'null')
     if (!saved) return fallback
     return {
       mode: saved.mode === 'bike' ? 'bike' : 'walk',
@@ -65,19 +100,22 @@ function loadPrefs() {
 }
 
 /** Keep restored values inside the slider ranges, whatever is in storage. */
-function clampPair(value, fallback) {
+function clampPair(
+  value: unknown,
+  fallback: Record<Profile, number>,
+): Record<Profile, number> {
   if (!value || typeof value !== 'object') return fallback
-  const out = {}
-  for (const mode of ['walk', 'bike']) {
-    const n = Number(value[mode])
+  const out = {} as Record<Profile, number>
+  for (const mode of ['walk', 'bike'] as const) {
+    const n = Number((value as Record<string, unknown>)[mode])
     out[mode] = Number.isFinite(n) ? n : fallback[mode]
   }
   return out
 }
 
-function loadSavedStart() {
+function loadSavedStart(): Start | null {
   try {
-    const saved = JSON.parse(localStorage.getItem(START_KEY))
+    const saved = JSON.parse(localStorage.getItem(START_KEY) ?? 'null')
     if (Array.isArray(saved?.lngLat) && typeof saved?.label === 'string') {
       return saved
     }
@@ -90,7 +128,7 @@ function loadSavedStart() {
 const prefs = loadPrefs()
 const savedRoute = loadSavedRoute()
 
-export const store = reactive({
+export const store = reactive<Store>({
   mode: prefs.mode, // 'walk' | 'bike'
   start: loadSavedStart(), // { lngLat: [lng, lat], label: string }
   targetType: prefs.targetType, // 'distance' | 'time'
@@ -143,7 +181,7 @@ export function resumeSession() {
 }
 
 // Ranges can change between versions; pull restored values back in bounds.
-for (const mode of ['walk', 'bike']) {
+for (const mode of ['walk', 'bike'] as const) {
   const r = RANGES[mode]
   store.km[mode] = Math.min(Math.max(store.km[mode], r.km.min), r.km.max)
   store.minutes[mode] = Math.min(Math.max(store.minutes[mode], r.min.min), r.min.max)
@@ -170,16 +208,16 @@ watch(
 )
 
 let flyId = 0
-let abortController = null
-let errorTimer = null
+let abortController: AbortController | null = null
+let errorTimer: ReturnType<typeof setTimeout> | undefined
 
-export function showError(message) {
+export function showError(message: string) {
   store.error = message
   clearTimeout(errorTimer)
   errorTimer = setTimeout(() => (store.error = ''), 4500)
 }
 
-export function setNature(value) {
+export function setNature(value: boolean) {
   store.nature = value
   try {
     localStorage.setItem('meguri-nature', value ? 'on' : 'off')
@@ -188,12 +226,16 @@ export function setNature(value) {
   }
 }
 
-export function targetKm() {
+export function targetKm(): number {
   if (store.targetType === 'distance') return store.km[store.mode]
   return Math.max(1, (store.minutes[store.mode] / 60) * SPEEDS[store.mode])
 }
 
-export function setStart(lngLat, label = null, { fly = false, zoom = 14 } = {}) {
+export function setStart(
+  lngLat: LngLat,
+  label: string | null = null,
+  { fly = false, zoom = 14 } = {},
+) {
   store.route = null
   store.start = {
     lngLat,
@@ -237,19 +279,19 @@ function persistWaypoints() {
 }
 
 // A changed constraint invalidates the current loop, like moving the start.
-export function addWaypoint(lngLat) {
+export function addWaypoint(lngLat: LngLat) {
   store.waypoints = [...store.waypoints, lngLat]
   store.route = null
   persistWaypoints()
 }
 
-export function moveWaypoint(index, lngLat) {
+export function moveWaypoint(index: number, lngLat: LngLat) {
   store.waypoints = store.waypoints.map((p, i) => (i === index ? lngLat : p))
   store.route = null
   persistWaypoints()
 }
 
-export function removeWaypoint(index) {
+export function removeWaypoint(index: number) {
   store.waypoints = store.waypoints.filter((_, i) => i !== index)
   store.route = null
   persistWaypoints()
@@ -306,7 +348,7 @@ export async function generate({ shuffle = false } = {}) {
       signal: abortController.signal,
     })
   } catch (err) {
-    if (err.name !== 'AbortError') {
+    if ((err as Error).name !== 'AbortError') {
       showError('errNoRoute')
     }
   } finally {

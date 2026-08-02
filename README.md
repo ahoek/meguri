@@ -62,16 +62,17 @@ through it, self-host BRouter and Nominatim, or move to a commercial plan.
 
 ## Stack
 
-Vue 3, Vite, MapLibre GL JS, `vite-plugin-pwa`, and a small hand-rolled i18n
-layer in `src/i18n.js`. No UI framework, no state library.
+Vue 3 with TypeScript, Vite, MapLibre GL JS, `vite-plugin-pwa`, and a small
+hand-rolled i18n layer in `src/i18n.ts`. No UI framework, no state library.
 
 ## Development
 
 ```sh
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # production build + service worker into dist/
-npm run preview  # serve the production build
+pnpm install
+pnpm dev        # http://localhost:5173
+pnpm build      # production build + service worker into dist/
+pnpm preview    # serve the production build
+pnpm typecheck  # vue-tsc over src and tests
 ```
 
 Regenerate the PNG icons after editing `public/favicon.svg`:
@@ -83,7 +84,7 @@ node scripts/make-icons.mjs
 ### Tests
 
 ```sh
-npm test
+pnpm test
 ```
 
 Vitest, no browser. The suite pins down the navigation logic that is awkward

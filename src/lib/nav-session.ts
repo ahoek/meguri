@@ -5,10 +5,34 @@ import {
   locateInitial,
   nextManeuver,
   routeBearingAt,
-} from './navigation.js'
-import { speakManeuver, resetSpeech } from './speech.js'
-import { routeBetween } from './route.js'
-import { distanceKm } from './geo.js'
+} from './navigation'
+import { speakManeuver, resetSpeech } from './speech'
+import { routeBetween } from './route'
+import { distanceKm } from './geo'
+import type { LngLat } from './geo'
+import type { Route, Profile } from './route'
+import type { Maneuver, PreparedRoute } from './navigation'
+
+interface NavState {
+  active: boolean
+  ready: boolean
+  position: LngLat | null
+  snapped: LngLat | null
+  heading: number | null
+  accuracy: number | null
+  alongKm: number
+  remainingKm: number
+  remainingSec: number
+  paceKmh: number
+  stationary: boolean
+  fixAt: number
+  maneuver: (Maneuver & { distanceM: number }) | null
+  offRoute: boolean
+  arrived: boolean
+  voice: boolean
+  rejoin: { coordinates: LngLat[]; distanceKm: number } | null
+  rejoining: boolean
+}
 
 const ARRIVE_M = 25
 
@@ -20,8 +44,8 @@ const OFF_ROUTE_FIXES = 3
 const BACK_ON_ROUTE_M = 30
 
 // Nothing plausible happens faster than this, whatever the GPS claims.
-const MAX_SPEED_KMH = { walk: 12, bike: 45 }
-const DEFAULT_PACE_KMH = { walk: 4.8, bike: 16 }
+const MAX_SPEED_KMH: Record<Profile, number> = { walk: 12, bike: 45 }
+const DEFAULT_PACE_KMH: Record<Profile, number> = { walk: 4.8, bike: 16 }
 
 // Two different speeds, because they answer different questions.
 // `paceKmh` is how fast you are going *now* — it must fall to zero the moment
@@ -34,7 +58,7 @@ const PACE_SMOOTHING = 0.4
 const MOVING_PACE_SMOOTHING = 0.12
 const MOVING_THRESHOLD_KMH = 2.5
 
-export const nav = reactive({
+export const nav = reactive<NavState>({
   active: false,
   ready: false, // a GPS fix has arrived
   position: null, // [lng, lat] raw GPS
@@ -55,9 +79,9 @@ export const nav = reactive({
   rejoining: false,
 })
 
-let prepared = null
-let watchId = null
-let wakeLock = null
+let prepared: PreparedRoute | null = null
+let watchId: number | null = null
+let wakeLock: WakeLockSentinel | null = null
 let lastIndex = 0
 let alongKm = 0
 let maxAlongKm = 0
@@ -68,12 +92,12 @@ let lastAcceptedAt = 0
 let doubts = 0
 let strayFixes = 0
 let haveFirstFix = false
-let rejoinAbort = null
-let rejoinFrom = null
-let profileMode = 'walk'
+let rejoinAbort: AbortController | null = null
+let rejoinFrom: LngLat | null = null
+let profileMode: Profile = 'walk'
 let natureOn = true
 
-export function setVoice(on) {
+export function setVoice(on: boolean) {
   nav.voice = on
   try {
     localStorage.setItem('meguri-voice', on ? 'on' : 'off')
@@ -85,7 +109,7 @@ export function setVoice(on) {
 
 async function acquireWakeLock() {
   try {
-    wakeLock = await navigator.wakeLock?.request('screen')
+    wakeLock = (await navigator.wakeLock?.request('screen')) ?? null
   } catch {
     /* denied or unsupported — navigation still works, screen may sleep */
   }
@@ -109,9 +133,9 @@ function onVisibility() {
  * Zero is a real measurement, not noise: discarding it was what kept the
  * display gliding forward at riding speed while the rider stood still.
  */
-function updatePace(gpsSpeed, advancedKm, dtSec) {
+function updatePace(gpsSpeed: number | null, advancedKm: number, dtSec: number) {
   const ceiling = MAX_SPEED_KMH[profileMode]
-  let sample = null
+  let sample: number | null = null
 
   if (typeof gpsSpeed === 'number' && !Number.isNaN(gpsSpeed) && gpsSpeed >= 0) {
     sample = gpsSpeed * 3.6
@@ -152,7 +176,7 @@ const MAX_DOUBTS = 3
  * budget never widens, so every later fix looks like an impossible leap and
  * navigation silently stops following you.
  */
-function plausible(candidateKm, nowMs) {
+function plausible(candidateKm: number, nowMs: number) {
   if (!haveFirstFix) return true
   if (doubts >= MAX_DOUBTS) return true
 
@@ -166,9 +190,9 @@ function plausible(candidateKm, nowMs) {
   return true
 }
 
-function onPosition(pos) {
+function onPosition(pos: GeolocationPosition) {
   const { longitude, latitude, heading, speed, accuracy } = pos.coords
-  const position = [longitude, latitude]
+  const position: LngLat = [longitude, latitude]
   const now = pos.timestamp || Date.now()
   const dtSec = lastFixAt ? Math.max((now - lastFixAt) / 1000, 0.5) : 1
 
@@ -177,8 +201,8 @@ function onPosition(pos) {
   nav.accuracy = accuracy
 
   const fix = haveFirstFix
-    ? locateOnRoute(prepared, position, lastIndex)
-    : locateInitial(prepared, position)
+    ? locateOnRoute(prepared!, position, lastIndex)
+    : locateInitial(prepared!, position)
 
   const accepted = plausible(fix.alongKm, now)
   if (accepted) {
@@ -220,7 +244,7 @@ function onPosition(pos) {
   nav.alongKm = alongKm
   nav.paceKmh = paceKmh
   nav.fixAt = performance.now()
-  nav.remainingKm = Math.max(0, prepared.totalKm - alongKm)
+  nav.remainingKm = Math.max(0, prepared!.totalKm - alongKm)
   nav.remainingSec = (nav.remainingKm / movingPaceKmh) * 3600
 
   // Point the way the route runs, not the way the GPS thinks you're facing:
@@ -229,14 +253,14 @@ function onPosition(pos) {
     ? (typeof heading === 'number' && !Number.isNaN(heading)
         ? heading
         : nav.heading)
-    : routeBearingAt(prepared, lastIndex)
+    : routeBearingAt(prepared!, lastIndex)
 
-  const maneuver = nav.offRoute ? null : nextManeuver(prepared, alongKm)
+  const maneuver = nav.offRoute ? null : nextManeuver(prepared!, alongKm)
   nav.maneuver = maneuver
 
   // The finish is also the start, so arriving requires having gone round.
-  const toFinishM = (prepared.totalKm - alongKm) * 1000
-  const wentRound = maxAlongKm > prepared.totalKm * 0.7
+  const toFinishM = (prepared!.totalKm - alongKm) * 1000
+  const wentRound = maxAlongKm > prepared!.totalKm * 0.7
   nav.arrived = wentRound && toFinishM < ARRIVE_M
 
   if (nav.offRoute) {
@@ -260,7 +284,7 @@ const REJOIN_REFRESH_M = 45 // recompute once you've wandered this much further
  * rewritten — a round trip of a chosen length only stays that if it survives
  * intact — so this is a separate "get back on" path.
  */
-async function maybeRejoin(position, fix) {
+async function maybeRejoin(position: LngLat, fix: { index: number }) {
   if (nav.rejoining) return
   if (rejoinFrom && distanceKm(rejoinFrom, position) * 1000 < REJOIN_REFRESH_M) {
     return
@@ -268,8 +292,8 @@ async function maybeRejoin(position, fix) {
 
   // Aim a little ahead of the nearest point so the path leads forward along
   // the loop rather than doubling back to where you left it.
-  const lookahead = Math.min(fix.index + 8, prepared.coords.length - 1)
-  const target = prepared.coords[lookahead]
+  const lookahead = Math.min(fix.index + 8, prepared!.coords.length - 1)
+  const target = prepared!.coords[lookahead]
 
   nav.rejoining = true
   rejoinAbort?.abort()
@@ -297,7 +321,11 @@ function onPositionError() {
   nav.ready = false
 }
 
-export function startNavigation(route, { mode = 'walk', nature = true } = {}) {
+export function startNavigation(
+  route: Route | null,
+  { mode = 'walk' as Profile, nature = true } = {},
+): boolean {
+  if (!route) return false
   if (!('geolocation' in navigator)) return false
 
   profileMode = mode
@@ -374,5 +402,5 @@ export function currentIndex() {
 // Navigation can't be exercised without physically moving, so in dev expose
 // the live session for simulated GPS traces. Stripped from production builds.
 if (import.meta.env.DEV) {
-  window.__navSession = { nav, preparedRoute, currentIndex }
+  ;(window as any).__navSession = { nav, preparedRoute, currentIndex }
 }

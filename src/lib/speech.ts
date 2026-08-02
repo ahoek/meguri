@@ -1,20 +1,21 @@
 import { ref, watch } from 'vue'
-import { locale, t } from '../i18n.js'
+import { locale, t } from '../i18n'
+import type { Maneuver } from './navigation'
 
 // Announce each maneuver at most once per band. Ascending order matters:
 // we want the *smallest* band the distance still fits in, so the near
 // warnings fire as you close in rather than being swallowed by the far one.
 const THRESHOLDS = [30, 150, 400]
-const VOICE_LANG = { en: 'en-GB', nl: 'nl-NL', ja: 'ja-JP' }
+const VOICE_LANG: Record<string, string> = { en: 'en-GB', nl: 'nl-NL', ja: 'ja-JP' }
 
 // Spoken units are spelled out — a synthesiser reads "90 m" as "ninety m".
-const SPOKEN_UNIT = {
+const SPOKEN_UNIT: Record<string, { m: string; km: string }> = {
   en: { m: 'metres', km: 'kilometres' },
   nl: { m: 'meter', km: 'kilometer' },
   ja: { m: 'メートル', km: 'キロ' },
 }
 
-let spokenFor = new Map() // maneuver key → smallest threshold already said
+let spokenFor = new Map<string, number>() // maneuver key → smallest threshold already said
 let saidArrived = false
 let saidOffRoute = false
 let unlocked = false
@@ -24,9 +25,9 @@ let unlocked = false
 // app language. Voices load asynchronously (empty list until voiceschanged).
 const VOICE_CHOICE_KEY = 'meguri-voice-choice'
 
-function loadVoiceChoices() {
+function loadVoiceChoices(): Record<string, string> {
   try {
-    const saved = JSON.parse(localStorage.getItem(VOICE_CHOICE_KEY))
+    const saved = JSON.parse(localStorage.getItem(VOICE_CHOICE_KEY) ?? 'null')
     return saved && typeof saved === 'object' ? saved : {}
   } catch {
     return {}
@@ -34,10 +35,10 @@ function loadVoiceChoices() {
 }
 
 /** voiceURI per app language, e.g. { nl: '…Xander…' }. Empty = automatic. */
-export const voiceChoice = ref(loadVoiceChoices())
+export const voiceChoice = ref<Record<string, string>>(loadVoiceChoices())
 
 /** Voices the browser offers for the current app language. */
-export const availableVoices = ref([])
+export const availableVoices = ref<SpeechSynthesisVoice[]>([])
 
 function refreshVoices() {
   const synth = window.speechSynthesis
@@ -53,7 +54,7 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
   watch(locale, refreshVoices)
 }
 
-export function setChosenVoice(uri) {
+export function setChosenVoice(uri: string) {
   const next = { ...voiceChoice.value }
   if (uri) next[locale.value] = uri
   else delete next[locale.value]
@@ -105,7 +106,7 @@ export function resetSpeech() {
   // load, not per navigation session.
 }
 
-function say(text) {
+function say(text: string) {
   const synth = window.speechSynthesis
   if (!synth) return
   const utterance = new SpeechSynthesisUtterance(text)
@@ -120,7 +121,7 @@ function say(text) {
   synth.speak(utterance)
 }
 
-function spokenDistance(metres) {
+function spokenDistance(metres: number) {
   const unit = SPOKEN_UNIT[locale.value] ?? SPOKEN_UNIT.en
   const sep = locale.value === 'ja' ? '' : ' '
   if (metres >= 1000) {
@@ -133,7 +134,7 @@ function spokenDistance(metres) {
 }
 
 /** "In 200 m, turn left" — Japanese puts the distance first, then the turn. */
-function phrase(maneuver, threshold) {
+function phrase(maneuver: Maneuver & { distanceM: number }, threshold: number) {
   const turn = t(`nav_${maneuver.kind}`)
   if (threshold <= 30) return turn
   const distance = spokenDistance(maneuver.distanceM)
@@ -142,7 +143,15 @@ function phrase(maneuver, threshold) {
     : `${t('navIn')} ${distance}, ${turn}`
 }
 
-export function speakManeuver({ maneuver, arrived, offRoute }) {
+export function speakManeuver({
+  maneuver,
+  arrived,
+  offRoute,
+}: {
+  maneuver: (Maneuver & { distanceM: number }) | null
+  arrived: boolean
+  offRoute: boolean
+}) {
   if (arrived) {
     if (!saidArrived) {
       saidArrived = true

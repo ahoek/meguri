@@ -1,9 +1,15 @@
+/**
+ * A [longitude, latitude] pair. Route geometry from BRouter carries an
+ * elevation as a third element, which the rest tuple absorbs.
+ */
+export type LngLat = [number, number, ...number[]]
+
 const R = 6371 // earth radius, km
-const rad = (d) => (d * Math.PI) / 180
-const deg = (r) => (r * 180) / Math.PI
+const rad = (d: number) => (d * Math.PI) / 180
+const deg = (r: number) => (r * 180) / Math.PI
 
 /** Destination point given start [lng, lat], bearing (deg) and distance (km). */
-export function destination([lng, lat], bearing, distKm) {
+export function destination([lng, lat]: LngLat, bearing: number, distKm: number): LngLat {
   const δ = distKm / R
   const θ = rad(bearing)
   const φ1 = rad(lat)
@@ -21,7 +27,7 @@ export function destination([lng, lat], bearing, distKm) {
 }
 
 /** Great-circle distance in km between two [lng, lat] points. */
-export function distanceKm([lng1, lat1], [lng2, lat2]) {
+export function distanceKm([lng1, lat1]: LngLat, [lng2, lat2]: LngLat): number {
   const φ1 = rad(lat1)
   const φ2 = rad(lat2)
   const Δφ = rad(lat2 - lat1)
@@ -36,12 +42,18 @@ export function distanceKm([lng1, lat1], [lng2, lat2]) {
  * lies at `bearing` from the start. The other points are spread around that
  * same circle, walked clockwise or counter-clockwise.
  */
-export function loopViaPoints(start, radiusKm, bearing, clockwise, count = 3) {
+export function loopViaPoints(
+  start: LngLat,
+  radiusKm: number,
+  bearing: number,
+  clockwise: boolean,
+  count = 3,
+): LngLat[] {
   const center = destination(start, bearing, radiusKm)
   const startAngle = bearing + 180 // angle of the start, seen from the center
   const dir = clockwise ? 1 : -1
   const step = 360 / (count + 1)
-  const points = []
+  const points: LngLat[] = []
   for (let i = 1; i <= count; i++) {
     points.push(destination(center, startAngle + dir * step * i, radiusKm))
   }
@@ -49,7 +61,7 @@ export function loopViaPoints(start, radiusKm, bearing, clockwise, count = 3) {
 }
 
 /** Initial bearing (deg) from a to b. */
-export function bearingBetween([lng1, lat1], [lng2, lat2]) {
+export function bearingBetween([lng1, lat1]: LngLat, [lng2, lat2]: LngLat): number {
   const φ1 = rad(lat1)
   const φ2 = rad(lat2)
   const Δλ = rad(lng2 - lng1)
@@ -60,7 +72,7 @@ export function bearingBetween([lng1, lat1], [lng2, lat2]) {
 }
 
 /** Centroid of [lng, lat] points — plenty accurate at loop scale. */
-function centroid(points) {
+function centroid(points: LngLat[]): LngLat {
   const sum = points.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0])
   return [sum[0] / points.length, sum[1] / points.length]
 }
@@ -73,22 +85,22 @@ function centroid(points) {
  * so the loop goes round rather than zigzagging. The start is not included.
  */
 export function loopViaWithWaypoints(
-  start,
-  waypoints,
-  radiusKm,
-  phase,
-  clockwise,
-  count,
-) {
+  start: LngLat,
+  waypoints: LngLat[],
+  radiusKm: number,
+  phase: number,
+  clockwise: boolean,
+  count: number,
+): LngLat[] {
   const center = centroid([start, ...waypoints])
   const dir = clockwise ? 1 : -1
   const startAngle = bearingBetween(center, start)
   // Angle walked from the start, in the travel direction: 0..360.
-  const angleOf = (p) => (((bearingBetween(center, p) - startAngle) * dir) % 360 + 360) % 360
+  const angleOf = (p: LngLat) => (((bearingBetween(center, p) - startAngle) * dir) % 360 + 360) % 360
 
   const points = waypoints.map((p) => ({ point: p, angle: angleOf(p) }))
   const step = 360 / (count + 1)
-  const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b))
+  const gap = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b))
   for (let i = 1; i <= count; i++) {
     const angle = (step * i + phase) % 360
     // A generated point next to the start or a waypoint adds no shape,

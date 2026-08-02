@@ -1,13 +1,13 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref, watchEffect } from 'vue'
 import MapView from './components/MapView.vue'
 import ControlPanel from './components/ControlPanel.vue'
 import NavPanel from './components/NavPanel.vue'
-import { store, resumeSession } from './store.js'
-import { nav } from './lib/nav-session.js'
-import { locale, t } from './i18n.js'
+import { store, resumeSession } from './store'
+import { nav } from './lib/nav-session'
+import { locale, t } from './i18n'
 
-const mapView = ref(null)
+const mapView = ref<InstanceType<typeof MapView> | null>(null)
 
 watchEffect(() => {
   document.documentElement.dataset.mode = store.mode

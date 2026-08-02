@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ORIGIN, offset, metresBetween } from './helpers.js'
+import { ORIGIN, offset, metresBetween } from './helpers'
+import type { LngLat } from '../src/lib/geo'
+import type { VoiceHint } from '../src/lib/route'
 
 // route.js reaches for BRouter as soon as it is asked to route; these tests
 // only exercise the shaping it does to the answer.
 async function loadRoute() {
   vi.resetModules()
   vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-  return import('../src/lib/route.js')
+  return import('../src/lib/route')
 }
 
-function brouterResponse(coordinates, voicehints = []) {
+function brouterResponse(coordinates: LngLat[], voicehints: VoiceHint[] = []) {
   return {
     features: [
       {
@@ -25,7 +27,7 @@ function brouterResponse(coordinates, voicehints = []) {
 }
 
 /** Drive one generateLoop attempt and capture what it produced. */
-async function routeThrough(coordinates, voicehints) {
+async function routeThrough(coordinates: LngLat[], voicehints: VoiceHint[] = []) {
   const mod = await loadRoute()
   vi.stubGlobal(
     'fetch',
@@ -104,7 +106,7 @@ describe('scoring loop candidates', () => {
     // No doubling, but half a kilometre over target.
     const clean = [a, offset(a, 0, 300), offset(a, 300, 300), offset(a, 300, 0), a]
 
-    const response = (coordinates, lengthM) =>
+    const response = (coordinates: LngLat[], lengthM: number) =>
       new Response(
         JSON.stringify({
           features: [
@@ -142,7 +144,7 @@ describe('scoring loop candidates', () => {
 describe('waypoints', () => {
   it('routes the loop through every user waypoint', async () => {
     const mod = await loadRoute()
-    const urls = []
+    const urls: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url) => {
