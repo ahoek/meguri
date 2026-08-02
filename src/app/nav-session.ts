@@ -8,6 +8,7 @@ import {
   AT_START_M,
 } from '../domain/navigation'
 import { speakManeuver, resetSpeech } from './guidance'
+import { startCompass, stopCompass, compassHeading } from '../infra/compass'
 import { routeBetween } from '../infra/brouter'
 import { distanceKm } from '../domain/geo'
 import type { LngLat } from '../domain/geo'
@@ -399,6 +400,8 @@ export function startNavigation(
     timeout: 15000,
   })
   acquireWakeLock()
+  // Must be asked for inside the tap that got us here, or iOS refuses.
+  if (mode === 'walk') startCompass()
   document.addEventListener('visibilitychange', onVisibility)
   return true
 }
@@ -408,6 +411,7 @@ export function stopNavigation() {
   watchId = null
   document.removeEventListener('visibilitychange', onVisibility)
   releaseWakeLock()
+  stopCompass()
   resetSpeech()
   prepared = null
   nav.active = false
@@ -417,6 +421,30 @@ export function stopNavigation() {
   nav.rejoin = null
   rejoinAbort?.abort()
   rejoinFrom = null
+}
+
+/**
+ * Which way to point the arrow and aim the camera.
+ *
+ * On a bike the route's own direction is steadier than anything the phone
+ * reports, and the phone is usually strapped down facing forwards anyway. On
+ * foot it is the other way round: you hold the phone the way you are looking,
+ * and course over ground is noise until you are moving properly. So walking
+ * follows the compass, and falls back to the road when there is no reading.
+ */
+export function deviceHeading(): number | null {
+  return profileMode === 'walk' ? compassHeading() : null
+}
+
+/** How much of the gap to a fresh fix to close per frame, and how far we may
+ *  guess ahead between fixes. A walker covers 1.4 m/s, so there is little to
+ *  gain from dead reckoning and plenty to lose — every guessed metre is one
+ *  that may have to be taken back. A rider covers four times that, where
+ *  carrying the position forward is what keeps the map from lurching. */
+export function reckoning() {
+  return profileMode === 'walk'
+    ? { maxSeconds: 0, damping: 0, maxKm: 0, positionEase: 0.24 }
+    : { maxSeconds: 3, damping: 0.5, maxKm: 0.012, positionEase: 0.1 }
 }
 
 /** Exposed so the map can draw the traveled/remaining split. */

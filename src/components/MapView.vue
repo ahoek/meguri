@@ -9,7 +9,13 @@ import {
   removeWaypoint,
 } from '../app/store'
 import { distanceKm } from '../domain/geo'
-import { nav, preparedRoute, currentIndex } from '../app/nav-session'
+import {
+  nav,
+  preparedRoute,
+  currentIndex,
+  deviceHeading,
+  reckoning,
+} from '../app/nav-session'
 import {
   traveledLine,
   positionAtKm,
@@ -62,6 +68,56 @@ const GRADIENTS: Record<Profile, [string, string]> = {
 function lineGradient(mode: Profile): maplibregl.ExpressionSpecification {
   const [from, to] = GRADIENTS[mode]
   return ['interpolate', ['linear'], ['line-progress'], 0, from, 1, to]
+}
+
+// A path you can walk two abreast on. Drawn to that width on the ground
+// rather than to a pixel count, so it reads as a real path at every zoom
+// instead of a ribbon that swallows the street when you zoom in.
+const PATH_WIDTH_M = 1.5
+const CASING_WIDTH_M = 2.3
+const EQUATOR_M_PER_PX = 156543.03392 // at zoom 0, 256 px tiles
+
+/**
+ * Line width held constant on the ground.
+ *
+ * Metres per pixel halve with every zoom level, so a fixed ground width
+ * doubles — which is exactly what an exponential-base-2 interpolation between
+ * two stops produces. Below `minPx` the line would be thinner than a hairline
+ * and the loop would vanish from the planner, so it flattens out there.
+ */
+function groundWidth(metres: number, lat: number, minPx: number) {
+  const perPx = EQUATOR_M_PER_PX * Math.cos((lat * Math.PI) / 180)
+  const pxAt = (zoom: number) => (metres * Math.pow(2, zoom)) / perPx
+  // The zoom at which the true width overtakes the floor.
+  const pinned = Math.log2((minPx * perPx) / metres)
+  return [
+    'interpolate',
+    ['exponential', 2],
+    ['zoom'],
+    0,
+    minPx,
+    pinned,
+    minPx,
+    22,
+    pxAt(22),
+  ] as maplibregl.ExpressionSpecification
+}
+
+/** Latitude the route sits at — width in metres depends on where you are. */
+function routeLat() {
+  return store.route?.geometry.coordinates[0]?.[1] ?? store.start?.lngLat[1] ?? 52
+}
+
+function applyPathWidths() {
+  const lat = routeLat()
+  const line = groundWidth(PATH_WIDTH_M, lat, 5)
+  const casing = groundWidth(CASING_WIDTH_M, lat, 8)
+  if (map.getLayer('route-line')) map.setPaintProperty('route-line', 'line-width', line)
+  if (map.getLayer('route-casing')) map.setPaintProperty('route-casing', 'line-width', casing)
+  if (map.getLayer('traveled-line')) map.setPaintProperty('traveled-line', 'line-width', line)
+  if (map.getLayer('rejoin-line')) {
+    map.setPaintProperty('rejoin-line', 'line-width', groundWidth(PATH_WIDTH_M, lat, 4))
+  }
 }
 
 function routeFeature(coordinates: LngLat[]) {
@@ -145,6 +201,7 @@ function drawRoute(route: Route) {
   const coords = route.geometry.coordinates
   const source = map.getSource('route') as maplibregl.GeoJSONSource
   map.setPaintProperty('route-line', 'line-gradient', lineGradient(store.mode))
+  applyPathWidths() // metres per pixel depend on where the loop is
 
   const bounds = coords.reduce(
     (b, c) => b.extend(ll(c)),
@@ -289,10 +346,11 @@ const NAV_ZOOM = { walk: 20.4, bike: 20 }
 // the position forward along the route at the current pace and let each new
 // fix gently correct it.
 const FOLLOW_EASE = 0.12 // fraction of the remaining gap closed per frame
-const POSITION_EASE = 0.1 // how fast the shown position converges on the truth
 // Turning is eased far more slowly than panning: the map swinging round at
-// the same rate it slides felt abrupt at corners.
+// the same rate it slides felt abrupt at corners. A compass bearing is a
+// different animal — it answers to your wrist, so it has to keep up.
 const BEARING_EASE = 0.035
+const COMPASS_BEARING_EASE = 0.14
 // The camera centre trails the shown position through this ease. While
 // riding the lag is under a metre, but after Recenter (or lifting a pinch)
 // it turns the snap back into a glide.
@@ -338,34 +396,35 @@ function projectedNow(): Projection | null {
   const prepared = preparedRoute()
   if (!prepared) return null
 
+  // On foot this is the compass: the arrow points where you are facing, not
+  // where the road runs, so turning on the spot turns the map with you.
+  const device = deviceHeading()
+
   if (nav.offRoute || !nav.fixAt) {
     // Off the route, show where you actually are — not where you'd be if you
     // were still on it. Seeing the gap is the whole point of the warning.
     const raw = nav.offRoute ? nav.position : (nav.snapped ?? nav.position)
+    const heading = device ?? nav.heading
     return raw
-      ? {
-          position: raw,
-          index: currentIndex(),
-          bearing: nav.heading,
-          cameraBearing: nav.heading,
-        }
+      ? { position: raw, index: currentIndex(), bearing: heading, cameraBearing: heading }
       : null
   }
 
-  const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, MAX_DEAD_RECKON_S)
+  const { maxSeconds, damping, maxKm } = reckoning()
+  const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, maxSeconds)
   const ahead =
     nav.stationary || nav.paceKmh < MOVING_KMH
       ? 0 // standing still: the arrow stays put
-      : Math.min((nav.paceKmh / 3600) * elapsed * DEAD_RECKON_DAMPING, MAX_DEAD_RECKON_KM)
+      : Math.min((nav.paceKmh / 3600) * elapsed * damping, maxKm)
   const km = nav.alongKm + ahead
   const { position, index } = positionAtKm(prepared, km)
   return {
     position,
     index,
     // The arrow shows the road you are on, measured from where you stand.
-    bearing: segmentBearingAt(prepared, index, position),
+    bearing: device ?? segmentBearingAt(prepared, index, position),
     // The camera aims further ahead so it turns smoothly instead of snapping.
-    cameraBearing: bearingAlong(prepared, km),
+    cameraBearing: device ?? bearingAlong(prepared, km),
   }
 }
 
@@ -381,8 +440,9 @@ function followTick() {
     shown.lat = projected.position[1]
     shown.valid = true
   }
-  shown.lng += (projected.position[0] - shown.lng) * POSITION_EASE
-  shown.lat += (projected.position[1] - shown.lat) * POSITION_EASE
+  const positionEase = reckoning().positionEase
+  shown.lng += (projected.position[0] - shown.lng) * positionEase
+  shown.lat += (projected.position[1] - shown.lat) * positionEase
   const here: LngLat = [shown.lng, shown.lat]
 
   ensurePuck(here, projected.bearing)
@@ -399,7 +459,8 @@ function followTick() {
     cam.valid = true
   }
   if (projected.cameraBearing != null) {
-    cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * BEARING_EASE
+    const ease = deviceHeading() == null ? BEARING_EASE : COMPASS_BEARING_EASE
+    cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * ease
   }
   cam.lng += (here[0] - cam.lng) * CENTER_EASE
   cam.lat += (here[1] - cam.lat) * CENTER_EASE
@@ -466,6 +527,13 @@ function refreshNavPadding() {
  * straight bridge would cut across gardens and canals and suggest a way
  * through that isn't there.
  */
+// How far along the way back we have already trimmed. Only ever grows, and
+// resets when a fresh path arrives: a nearest-point search over the whole
+// path could match a later stretch that happens to pass close by, and lop
+// off everything before it — which is how the line came up short.
+let rejoinTrimmed = 0
+const ON_REJOIN_M = 25 // beyond this you are not on the path, you are near it
+
 function drawRejoin() {
   const source = map.getSource('rejoin') as maplibregl.GeoJSONSource | undefined
   if (!source) return
@@ -481,18 +549,22 @@ function drawRejoin() {
     return
   }
 
-  let nearest = 0
+  let nearest = rejoinTrimmed
   let best = Infinity
-  for (let i = 0; i < path.length; i++) {
+  for (let i = rejoinTrimmed; i < path.length; i++) {
     const d = distanceKm(from, path[i])
     if (d < best) {
       best = d
       nearest = i
     }
   }
-  // Keep at least a couple of points so it still reads as a line.
-  const ahead = path.slice(Math.min(nearest, path.length - 2))
-  source.setData(routeFeature(ahead))
+  // Only trim while you are actually walking the path. Wander off it and you
+  // get the whole of what is left — the part you haven't covered is exactly
+  // the part you still need to see.
+  if (best * 1000 <= ON_REJOIN_M) {
+    rejoinTrimmed = Math.min(nearest, path.length - 2)
+  }
+  source.setData(routeFeature(path.slice(rejoinTrimmed)))
 }
 
 let traveledPaintedAt = 0
@@ -620,7 +692,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#ffffff',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 9, 16, 17, 20, 24],
+        'line-width': groundWidth(CASING_WIDTH_M, routeLat(), 8),
         'line-opacity': 0.9,
       },
     })
@@ -631,7 +703,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         // Wider at navigation zooms, where the line is the thing you follow.
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 11, 20, 17],
+        'line-width': groundWidth(PATH_WIDTH_M, routeLat(), 5),
         'line-gradient': lineGradient(store.mode),
       },
     })
@@ -645,7 +717,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#f59e0b',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 10, 20, 14],
+        'line-width': groundWidth(PATH_WIDTH_M, routeLat(), 4),
         'line-dasharray': [1.6, 1.2],
       },
     })
@@ -659,7 +731,7 @@ onMounted(() => {
       layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'none' },
       paint: {
         'line-color': '#94a3b8',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 11, 20, 17],
+        'line-width': groundWidth(PATH_WIDTH_M, routeLat(), 5),
         'line-opacity': 0.85,
       },
     })
@@ -724,6 +796,7 @@ onMounted(() => {
   // Locale too: the pins carry their own "tap to remove" label.
   watch([() => store.waypoints, locale], renderWaypoints, { immediate: true })
 
+
   watch(
     () => store.route,
     (route) => {
@@ -779,7 +852,10 @@ onMounted(() => {
 
   watch(
     () => nav.rejoin,
-    () => drawRejoin(),
+    () => {
+      rejoinTrimmed = 0 // a fresh path starts from where the rider is now
+      drawRejoin()
+    },
   )
 
   watch(

@@ -326,6 +326,12 @@ export function locate() {
   )
 }
 
+// The planner state is awkward to inspect from a component; in dev, expose it
+// the way nav-session exposes the live session. Stripped from production.
+if (import.meta.env.DEV) {
+  ;(window as any).__store = store
+}
+
 export async function generate({ shuffle = false } = {}) {
   if (!store.start) {
     showError('errNoStart')

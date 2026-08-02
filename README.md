@@ -23,7 +23,9 @@ Available in English, Dutch and Japanese. Installable as a PWA.
 - **No backtracking.** Loops are scored on how much they double back on
   themselves; a slightly shorter loop beats one that retraces its own steps.
 - **Turn-by-turn navigation** with a follow camera, spoken guidance in all
-  three languages, progress and arrival time, and a screen-wake lock.
+  three languages, progress and arrival time, and a screen-wake lock. On foot
+  the arrow and the map follow the compass, because course over ground is
+  meaningless at walking pace; on a bike they follow the road ahead.
 - **Wrong turn?** It routes you back to the loop rather than rewriting it — a
   round trip of a chosen length only stays that if it survives intact.
 - **GPX export** with elevation, for a watch or bike computer.
