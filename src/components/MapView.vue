@@ -19,14 +19,18 @@ let animationFrame = 0
 let resizeObserver = null
 let puck = null
 let followCamera = true
-let userMovedAt = 0
+// True while fingers rest on the map. Each jumpTo resets MapLibre's gesture
+// handlers, so with the follow loop writing the camera every frame a touch
+// pan could never accumulate enough movement to start (mouse drags activate
+// on the first move, which is why panning only failed on the phone). Hold the
+// camera still while touched and let the gesture events decide what follows.
+let touchesDown = false
 
 const EMPTY = { type: 'FeatureCollection', features: [] }
 
 defineExpose({
   recenter() {
     followCamera = true
-    userMovedAt = 0
     framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() }
     startFollowing()
   },
@@ -318,7 +322,7 @@ function followTick() {
   // The grey trail ends where the arrow is, not where the last fix was.
   paintTraveled({ position: here, index: projected.index })
 
-  if (!followCamera) return
+  if (!followCamera || touchesDown) return
 
   if (!cam.valid) {
     cam.bearing = projected.cameraBearing ?? map.getBearing()
@@ -376,10 +380,6 @@ function refreshNavPadding() {
   if (!nav.active) return
   if (framing) framing.padding = navPadding()
   else map.setPadding(navPadding())
-}
-
-function cameraFollow(immediate = false) {
-  if (immediate) cam.valid = false
 }
 
 /**
@@ -588,20 +588,39 @@ onMounted(() => {
     if (nav.active) enterNavigation()
   })
 
-  // Dragging the map during navigation hands control back to the user;
-  // the Recenter button (or 12s idle) resumes following.
+  // Any manual pan, rotate or tilt during navigation hands the camera to the
+  // user; the Recenter button is the only way back. Note the follow loop's
+  // own jumpTo also fires rotate/pitch events — only real gestures carry an
+  // originalEvent.
+  const releaseCamera = () => {
+    followCamera = false
+    framing = null
+  }
   map.on('dragstart', () => {
-    if (nav.active) {
-      followCamera = false
-      framing = null
-      userMovedAt = performance.now()
-    }
+    if (nav.active) releaseCamera()
+  })
+  map.on('rotatestart', (e) => {
+    if (nav.active && e.originalEvent) releaseCamera()
+  })
+  map.on('pitchstart', (e) => {
+    if (nav.active && e.originalEvent) releaseCamera()
   })
 
-  // A pinch means you want a different zoom than the one we chose.
+  // A pinch means you want a different zoom than the one we chose, but you
+  // are still following.
   map.on('zoomstart', (e) => {
     if (nav.active && e.originalEvent) framing = null
   })
+
+  // See touchesDown above: freeze camera writes while fingers are down so
+  // MapLibre's touch handlers get to recognise the gesture at all.
+  const canvas = map.getCanvasContainer()
+  canvas.addEventListener('touchstart', () => (touchesDown = true), { passive: true })
+  const touchDone = (e) => {
+    if (e.touches.length === 0) touchesDown = false
+  }
+  canvas.addEventListener('touchend', touchDone, { passive: true })
+  canvas.addEventListener('touchcancel', touchDone, { passive: true })
 
   map.on('click', (e) => {
     if (nav.active) return // tapping the map must not relocate the route
@@ -653,16 +672,6 @@ onMounted(() => {
     },
   )
 
-  watch(
-    () => nav.snapped,
-    (snapped) => {
-      if (!snapped || !nav.active) return
-      if (!followCamera && performance.now() - userMovedAt > 12000) {
-        followCamera = true
-        startFollowing()
-      }
-    },
-  )
 })
 
 if (import.meta.env.DEV) {
