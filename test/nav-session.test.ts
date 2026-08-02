@@ -110,6 +110,39 @@ describe('starting navigation', () => {
     fix(p.coords[p.coords.length - 1], { speed: 1 })
     expect(nav.arrived).toBe(true)
   })
+
+  // Reported from the road: leave the app sitting at the start, come back to
+  // it much later, and the first fix would match the finish — which is the
+  // same patch of pavement — with a plausibility budget grown wide enough by
+  // the gap to wave it through. Navigation congratulated the rider on a loop
+  // they had not begun.
+  it('does not call it done after a long spell away from the screen', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+
+    // Twenty minutes later, still on the doorstep, with a sloppy fix.
+    fix(offset(ORIGIN, 70, 0), { speed: 0, afterSec: 20 * 60 })
+    fix(offset(ORIGIN, 60, 10), { speed: 0, afterSec: 4 })
+
+    expect(nav.arrived).toBe(false)
+    expect(nav.alongKm).toBeLessThan(0.1)
+    expect(nav.remainingKm).toBeCloseTo(p.totalKm, 1)
+  })
+
+  it('still catches up when the loop was ridden with the screen off', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+    rideTo(p, 0.3) // seen leaving, so a later relocation is believable
+
+    // Pocket for ten minutes, resurfacing three quarters of the way round.
+    const later = positionAtKm(p, p.totalKm * 0.75).position
+    fix(later, { speed: 5, afterSec: 10 * 60 })
+
+    expect(nav.alongKm).toBeCloseTo(p.totalKm * 0.75, 1)
+    expect(nav.arrived).toBe(false)
+  })
 })
 
 describe('standing still', () => {

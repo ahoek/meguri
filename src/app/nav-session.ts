@@ -5,6 +5,7 @@ import {
   locateInitial,
   nextManeuver,
   routeBearingAt,
+  AT_START_M,
 } from '../domain/navigation'
 import { speakManeuver, resetSpeech } from './guidance'
 import { routeBetween } from '../infra/brouter'
@@ -42,6 +43,15 @@ const ARRIVE_M = 25
 const OFF_ROUTE_M = 45
 const OFF_ROUTE_FIXES = 3
 const BACK_ON_ROUTE_M = 30
+
+// The same reasoning for "you have left the start": one stray reading past the
+// start's radius is not a departure.
+const AWAY_FIXES = 2
+
+// A fix from before the phone went into a pocket describes where you were, not
+// where you are. Coming back to a screen full of stale conclusions is how
+// navigation ended up announcing things that hadn't happened.
+const STALE_FIX_MS = 20_000
 
 // Nothing plausible happens faster than this, whatever the GPS claims.
 const MAX_SPEED_KMH: Record<Profile, number> = { walk: 12, bike: 45 }
@@ -93,6 +103,10 @@ let lastFixAt = 0
 let lastAcceptedAt = 0
 let doubts = 0
 let strayFixes = 0
+let awayFixes = 0
+// Have we actually seen the walker away from the start? Until we have, they
+// cannot have gone round, however the route projection reads.
+let leftStart = false
 let haveFirstFix = false
 let rejoinAbort: AbortController | null = null
 let rejoinFrom: LngLat | null = null
@@ -124,9 +138,11 @@ function releaseWakeLock() {
 
 // iOS drops the wake lock whenever the tab is backgrounded.
 function onVisibility() {
-  if (nav.active && document.visibilityState === 'visible' && !wakeLock) {
-    acquireWakeLock()
-  }
+  if (!nav.active || document.visibilityState !== 'visible') return
+  if (!wakeLock) acquireWakeLock()
+  // Back from a spell in a pocket: say we don't know where we are rather than
+  // leaving the last banner standing until the GPS catches up.
+  if (lastFixAt && Date.now() - lastFixAt > STALE_FIX_MS) nav.ready = false
 }
 
 /**
@@ -202,8 +218,16 @@ function onPosition(pos: GeolocationPosition) {
   nav.position = position
   nav.accuracy = accuracy
 
+  // Standing near the start, the finish is under your feet too. Refuse to be
+  // relocated across the loop until we have watched you leave.
+  if (!leftStart) {
+    const fromStartM = distanceKm(position, prepared!.coords[0]) * 1000
+    awayFixes = fromStartM > AT_START_M ? awayFixes + 1 : 0
+    if (awayFixes >= AWAY_FIXES) leftStart = true
+  }
+
   const fix = haveFirstFix
-    ? locateOnRoute(prepared!, position, lastIndex)
+    ? locateOnRoute(prepared!, position, lastIndex, { relocate: leftStart })
     : locateInitial(prepared!, position)
 
   const accepted = plausible(fix.alongKm, now)
@@ -260,9 +284,10 @@ function onPosition(pos: GeolocationPosition) {
   const maneuver = nav.offRoute ? null : nextManeuver(prepared!, alongKm)
   nav.maneuver = maneuver
 
-  // The finish is also the start, so arriving requires having gone round.
+  // The finish is also the start, so arriving requires having gone round —
+  // and going round requires having left in the first place.
   const toFinishM = (prepared!.totalKm - alongKm) * 1000
-  const wentRound = maxAlongKm > prepared!.totalKm * 0.7
+  const wentRound = leftStart && maxAlongKm > prepared!.totalKm * 0.7
   nav.arrived = wentRound && toFinishM < ARRIVE_M
 
   if (nav.offRoute) {
@@ -342,6 +367,8 @@ export function startNavigation(
   lastAcceptedAt = 0
   doubts = 0
   strayFixes = 0
+  awayFixes = 0
+  leftStart = false
   haveFirstFix = false
   resetSpeech()
 

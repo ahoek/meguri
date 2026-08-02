@@ -128,8 +128,19 @@ const progress = computed(() => {
 <template>
   <div class="nav" :class="{ arrived: nav.arrived }">
     <!-- Instruction banner -->
-    <div class="banner" :class="{ warn: nav.offRoute }">
-      <template v-if="nav.arrived">
+    <!-- Only colour it as a warning when it is actually warning about
+         something; re-acquiring GPS shouldn't come up red. -->
+    <div class="banner" :class="{ warn: nav.ready && nav.offRoute }">
+      <!-- No usable fix — from the very first second, or after the phone has
+           been away long enough that what's on screen is history. Admitting
+           that outranks every other banner: a stale one states things that
+           may no longer be true. -->
+      <template v-if="!nav.ready">
+        <span class="gps-spinner" aria-hidden="true"></span>
+        <p class="headline">{{ t('navWaitingGps') }}</p>
+      </template>
+
+      <template v-else-if="nav.arrived">
         <div class="finish-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="m5 12.5 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
@@ -151,11 +162,6 @@ const progress = computed(() => {
             {{ formatDistance(nav.rejoin.distanceKm * 1000) }}
           </span>
         </p>
-      </template>
-
-      <template v-else-if="!nav.ready">
-        <span class="gps-spinner" aria-hidden="true"></span>
-        <p class="headline">{{ t('navWaitingGps') }}</p>
       </template>
 
       <template v-else>

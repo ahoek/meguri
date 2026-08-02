@@ -16,7 +16,7 @@ import {
   bearingAlong,
   segmentBearingAt,
 } from '../domain/navigation'
-import { t } from '../i18n'
+import { locale, t } from '../i18n'
 import type { LngLat } from '../domain/geo'
 import type { Route, Profile } from '../domain/route'
 
@@ -78,7 +78,7 @@ function fitPadding() {
   // handle strip.
   const mobile = matchMedia('(max-width: 760px)').matches
   return mobile
-    ? { top: 70, left: 36, right: 36, bottom: (store.sheetInset || 58) + 40 }
+    ? { top: 70, left: 36, right: 36, bottom: (store.sheetInset || 46) + 40 }
     : { top: 90, left: 470, right: 90, bottom: 90 }
 }
 
@@ -106,6 +106,10 @@ function clearRoute() {
 }
 
 let wpMarkers: maplibregl.Marker[] = []
+// Letting go of a dragged marker also fires a click, which would delete the
+// stop you had just finished placing.
+let draggedAt = 0
+const DRAG_CLICK_GRACE_MS = 400
 
 /** Numbered pins for the stops; tap removes, drag moves. */
 function renderWaypoints() {
@@ -116,14 +120,19 @@ function renderWaypoints() {
     const el = document.createElement('div')
     el.className = 'wp-marker'
     el.textContent = String(index + 1)
+    el.setAttribute('role', 'button')
+    el.title = `${t('wpRemove')} ${index + 1}`
+    el.setAttribute('aria-label', el.title)
     el.addEventListener('click', (e) => {
       e.stopPropagation()
+      if (performance.now() - draggedAt < DRAG_CLICK_GRACE_MS) return
       removeWaypoint(index)
     })
     const marker = new maplibregl.Marker({ element: el, draggable: true })
       .setLngLat(ll(lngLat))
       .addTo(map)
     marker.on('dragend', () => {
+      draggedAt = performance.now()
       const p = marker.getLngLat()
       moveWaypoint(index, [p.lng, p.lat])
     })
@@ -712,7 +721,8 @@ onMounted(() => {
     { immediate: true },
   )
 
-  watch(() => store.waypoints, renderWaypoints, { immediate: true })
+  // Locale too: the pins carry their own "tap to remove" label.
+  watch([() => store.waypoints, locale], renderWaypoints, { immediate: true })
 
   watch(
     () => store.route,
@@ -798,12 +808,22 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="map" :aria-label="t('mapAria')"></div>
+  <div
+    ref="container"
+    class="map"
+    :class="{ dropping: store.waypointMode }"
+    :aria-label="store.waypointMode ? t('wpArmed') : t('mapAria')"
+  ></div>
 </template>
 
 <style scoped>
 .map {
   position: absolute;
   inset: 0;
+}
+
+/* Armed to drop stops: say so under the pointer as well as in the prompt. */
+.map.dropping :deep(.maplibregl-canvas) {
+  cursor: copy;
 }
 </style>

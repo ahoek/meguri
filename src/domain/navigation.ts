@@ -102,6 +102,10 @@ export function prepareRoute(route: Route): PreparedRoute {
 
 /** Project a position onto the route. */
 const RELOCATE_M = 60 // a worse match than this means the window was wrong
+// A relocation has to beat the window decisively, not merely tie with it. On a
+// loop the last leg runs back over the first, so "a few metres closer" there is
+// not evidence of a completed lap — it is the same street measured twice.
+const RELOCATE_MARGIN_M = 25
 const TIE_M = 20 // candidates this close to the best are treated as equal
 
 /**
@@ -112,7 +116,7 @@ const TIE_M = 20 // candidates this close to the best are treated as equal
  * which reads as "you have already gone all the way round". Among all
  * near-equal candidates, take the earliest one.
  */
-const AT_START_M = 90
+export const AT_START_M = 90
 
 export function locateInitial(prepared: PreparedRoute, position: LngLat): RouteFix {
   const { coords, cumulative } = prepared
@@ -147,25 +151,54 @@ export function locateInitial(prepared: PreparedRoute, position: LngLat): RouteF
   }
 }
 
+// How far around the last known position the tracking window reaches. Measured
+// in route distance, not vertices: BRouter's spacing runs from a couple of
+// metres on a mapped corner to hundreds on a straight, so a fixed vertex count
+// is a window of unknown size — on a short loop it spanned the whole thing,
+// which let a fix at the start match the finish and read as a completed lap.
+const WINDOW_BACK_KM = 0.05
+const WINDOW_AHEAD_KM = 1
+
+/** The last vertex at or before `km`. */
+function indexAtKm(cumulative: number[], km: number): number {
+  let lo = 0
+  let hi = cumulative.length - 1
+  if (km <= 0) return 0
+  if (km >= cumulative[hi]) return hi
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1
+    if (cumulative[mid] <= km) lo = mid
+    else hi = mid
+  }
+  return lo
+}
+
+/**
+ * Project a position onto the route, searching around where we last were.
+ *
+ * `relocate` allows the search to give up on that window and rescan the whole
+ * route — needed when the walker backtracks, the GPS jumps, or the phone spent
+ * a while in a pocket. It is refused before we have seen the walker leave the
+ * start, because at that point the only far-away match a rescan can find is
+ * the finish, sitting on the very spot they are standing on.
+ */
 export function locateOnRoute(
   prepared: PreparedRoute,
   position: LngLat,
   fromIndex = 0,
+  { relocate = true } = {},
 ): RouteFix {
-  const { coords } = prepared
-  // Search a window ahead of where we were, so a loop passing near itself
-  // can't teleport progress onto the wrong lap.
+  const { coords, cumulative } = prepared
+  const at = cumulative[Math.min(Math.max(fromIndex, 0), cumulative.length - 1)] ?? 0
   const windowed = scan(
     prepared,
     position,
-    Math.max(0, fromIndex - 12),
-    Math.min(coords.length - 1, fromIndex + 220),
+    indexAtKm(cumulative, at - WINDOW_BACK_KM),
+    Math.min(coords.length - 1, indexAtKm(cumulative, at + WINDOW_AHEAD_KM) + 1),
   )
-  // If nothing nearby fits — the walker backtracked, GPS jumped, or
-  // navigation resumed elsewhere — fall back to searching the whole route.
-  if (windowed.offRouteM <= RELOCATE_M) return windowed
+  if (!relocate || windowed.offRouteM <= RELOCATE_M) return windowed
   const full = scan(prepared, position, 0, coords.length - 1)
-  return full.offRouteM < windowed.offRouteM ? full : windowed
+  return full.offRouteM < windowed.offRouteM - RELOCATE_MARGIN_M ? full : windowed
 }
 
 function scan(

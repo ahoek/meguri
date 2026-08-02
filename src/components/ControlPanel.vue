@@ -11,6 +11,7 @@ import {
   generate,
   showError,
   clearWaypoints,
+  removeWaypoint,
 } from '../app/store'
 import { searchPlaces } from '../infra/nominatim'
 import { downloadGpx } from '../infra/gpx'
@@ -33,9 +34,9 @@ const collapsed = ref(false)
 const isMobile = () => matchMedia('(max-width: 760px)').matches
 const panelEl = ref<HTMLElement | null>(null)
 const sheetTopEl = ref<HTMLElement | null>(null)
-// The strip grows by the safe-area inset on phones with rounded corners, so
-// measure it rather than assuming the base 58px.
-const handleH = () => sheetTopEl.value?.offsetHeight ?? 58
+// The strip grows by the home-indicator clearance on phones with rounded
+// corners, so measure it rather than assuming the base height.
+const handleH = () => sheetTopEl.value?.offsetHeight ?? 30
 
 watch(
   () => store.route,
@@ -229,11 +230,24 @@ function onStartNavigation() {
 
 const wpHint = computed(() => {
   if (store.waypointMode) return t('wpArmed')
-  const n = store.waypoints.length
-  if (!n) return t('wpHint')
-  return `${n} ${t(n === 1 ? 'wpStop' : 'wpStops')}`
+  return store.waypoints.length ? t('wpHave') : t('wpHint')
 })
 
+const stopLabel = (index: number) =>
+  locale.value === 'ja' ? `${t('wpStopN')}${index + 1}` : `${t('wpStopN')} ${index + 1}`
+
+/**
+ * Arm or disarm dropping stops on the map. On a phone the sheet is the map,
+ * so arming has to get out of the way — asking for taps on something you have
+ * just covered up was the heart of what made this confusing.
+ */
+function setWaypointMode(on: boolean) {
+  store.waypointMode = on
+  if (isMobile()) collapsed.value = on
+}
+
+// Clear of the sheet, whether that's the collapsed strip or nothing at all.
+const pillBottom = computed(() => `${store.sheetInset + 14}px`)
 
 // So an installed PWA can be checked against the latest deploy.
 const build = __BUILD__
@@ -267,6 +281,19 @@ const routeStats = computed(() => {
 </script>
 
 <template>
+  <!-- Dropping stops is a mode, and a mode you can't see is a mode you fight.
+       This says what the map is doing and gives you the way out. -->
+  <Transition name="pill">
+    <div v-if="store.waypointMode" class="wp-pill" :style="{ bottom: pillBottom }" role="status">
+      <svg class="wp-pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
+      </svg>
+      <span class="wp-pill-text">{{ t('wpArmed') }}</span>
+      <button @click="setWaypointMode(false)">{{ t('wpDone') }}</button>
+    </div>
+  </Transition>
+
   <section ref="panelEl" class="panel" :class="{ collapsed }" aria-label="Route planner">
     <div ref="sheetTopEl" class="sheet-top">
       <button
@@ -406,30 +433,43 @@ const routeStats = computed(() => {
       </p>
       <p v-else class="hint">{{ t('tapMapHint') }}</p>
 
-      <label v-if="store.start" class="wp-row">
-        <svg class="wp-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-          <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
-        </svg>
-        <span class="wp-text">
-          <strong>{{ t('wpLabel') }}</strong>
-          <small>{{ wpHint }}</small>
-        </span>
-        <button
-          v-if="store.waypoints.length"
-          class="wp-clear"
-          @click.stop.prevent="clearWaypoints()"
-        >
-          {{ t('wpClear') }}
-        </button>
-        <input
-          class="switch"
-          type="checkbox"
-          role="switch"
-          :checked="store.waypointMode"
-          @change="store.waypointMode = ($event.target as HTMLInputElement).checked"
-        />
-      </label>
+      <div v-if="store.start" class="wp-block" :class="{ armed: store.waypointMode }">
+        <div class="wp-head">
+          <svg class="wp-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
+          </svg>
+          <span class="wp-text">
+            <strong>{{ t('wpLabel') }}</strong>
+            <small>{{ wpHint }}</small>
+          </span>
+          <button
+            class="wp-toggle"
+            :class="{ on: store.waypointMode }"
+            :aria-pressed="store.waypointMode"
+            @click="setWaypointMode(!store.waypointMode)"
+          >
+            {{ store.waypointMode ? t('wpDone') : t('wpAdd') }}
+          </button>
+        </div>
+
+        <!-- The pins are numbered on the map; these are the same stops, with
+             a removal that doesn't depend on hitting a 25px target. -->
+        <ul v-if="store.waypoints.length" class="wp-list">
+          <li v-for="(_, i) in store.waypoints" :key="i">
+            <button class="wp-chip" :aria-label="`${t('wpRemove')} ${i + 1}`" @click="removeWaypoint(i)">
+              <span class="wp-num" aria-hidden="true">{{ i + 1 }}</span>
+              <span class="wp-chip-text">{{ stopLabel(i) }}</span>
+              <svg class="wp-x" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" />
+              </svg>
+            </button>
+          </li>
+          <li>
+            <button class="wp-clear" @click="clearWaypoints()">{{ t('wpClear') }}</button>
+          </li>
+        </ul>
+      </div>
     </div>
 
     <div class="field-group">
@@ -591,14 +631,20 @@ const routeStats = computed(() => {
 }
 
 .panel {
-  /* Grown by the bottom safe-area inset on mobile, so the collapsed strip
-     clears the rounded screen corners and the home indicator. */
-  --handle-h: 58px;
+  --handle-h: 30px;
 }
 
 @media (max-width: 760px) {
   .panel {
-    --handle-h: calc(58px + env(safe-area-inset-bottom, 0px));
+    /* Clearance for the home indicator. Donating the whole safe-area inset —
+       as a tab bar does — floated the grabber 60-odd pixels above the bottom
+       of an installed PWA, with a band of empty sheet under it. The indicator
+       itself only occupies the last few pixels, so keep a margin and give the
+       rest of the inset back to the map. */
+    --handle-pad: max(0px, calc(env(safe-area-inset-bottom, 0px) - 22px));
+    /* Nothing but a pull tab, until a route puts its figures and a start
+       button in the strip too. */
+    --handle-strip: 30px;
     left: 0;
     right: 0;
     bottom: 0;
@@ -609,6 +655,15 @@ const routeStats = computed(() => {
     border-radius: var(--radius) var(--radius) 0 0;
     transition: transform 0.42s cubic-bezier(0.3, 1, 0.3, 1);
     will-change: transform;
+  }
+
+  /* The strip only needs to be button-sized while it is carrying one. */
+  .panel:has(.mini-start) {
+    --handle-strip: 46px;
+  }
+
+  .panel {
+    --handle-h: calc(var(--handle-strip) + var(--handle-pad));
   }
 
   .panel.collapsed {
@@ -635,8 +690,8 @@ const routeStats = computed(() => {
     align-items: center;
     flex: none;
     height: var(--handle-h);
-    /* Keep the grabber and buttons in the flat part of the screen. */
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* Keep the grabber and buttons clear of the home indicator. */
+    padding-bottom: var(--handle-pad);
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
   }
@@ -646,7 +701,7 @@ const routeStats = computed(() => {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 4px;
     flex: 1;
     align-self: stretch;
     min-width: 0;
@@ -657,12 +712,12 @@ const routeStats = computed(() => {
   .mini-start {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
     flex: none;
     margin-right: 12px;
-    padding: 10px 16px;
-    border-radius: 12px;
-    font-size: 14.5px;
+    padding: 7px 13px;
+    border-radius: 11px;
+    font-size: 13.5px;
     font-weight: 700;
     color: #fff;
     background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
@@ -670,20 +725,20 @@ const routeStats = computed(() => {
   }
 
   .mini-start svg {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
   }
 
   .grabber {
-    width: 42px;
-    height: 4.5px;
+    width: 38px;
+    height: 4px;
     border-radius: 99px;
     background: var(--ink-3);
     opacity: 0.55;
   }
 
   .mini-stats {
-    font-size: 14.5px;
+    font-size: 13.5px;
     font-weight: 700;
     letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
@@ -1090,19 +1145,24 @@ const routeStats = computed(() => {
 }
 
 /* ---- waypoints ---- */
-.wp-row {
+.wp-block {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 15px;
+  flex-direction: column;
+  gap: 11px;
+  padding: 11px 13px 11px 15px;
   border-radius: 15px;
   background: var(--field);
-  cursor: pointer;
   transition: background 0.2s;
 }
 
-.wp-row:has(.switch:checked) {
+.wp-block.armed {
   background: var(--accent-soft);
+}
+
+.wp-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .wp-icon {
@@ -1110,9 +1170,10 @@ const routeStats = computed(() => {
   width: 21px;
   height: 21px;
   color: var(--ink-3);
+  transition: color 0.2s;
 }
 
-.wp-row:has(.switch:checked) .wp-icon {
+.wp-block.armed .wp-icon {
   color: var(--accent-1);
 }
 
@@ -1134,15 +1195,158 @@ const routeStats = computed(() => {
   color: var(--ink-3);
 }
 
-.wp-clear {
+.wp-toggle {
   flex: none;
-  padding: 6px 11px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  font-weight: 600;
+  padding: 8px 13px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--ink-2);
   background: var(--surface-solid);
   border: 1px solid var(--hairline);
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.wp-toggle:hover {
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.wp-toggle.on {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+}
+
+.wp-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wp-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px 4px 4px;
+  border-radius: 99px;
+  background: var(--surface-solid);
+  border: 1px solid var(--hairline);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.wp-chip:hover {
+  color: #dc2626;
+  border-color: currentColor;
+}
+
+.wp-num {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface-solid);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.wp-chip-text {
+  white-space: nowrap;
+}
+
+.wp-x {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.wp-clear {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: none;
+  border: 1px dashed var(--hairline);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.wp-clear:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+/* ---- "tap the map" prompt, floating over the map ---- */
+.wp-pill {
+  position: absolute;
+  z-index: 15;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 8px 8px 15px;
+  border-radius: 99px;
+  background: var(--surface);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+}
+
+.wp-pill-icon {
+  flex: none;
+  width: 19px;
+  height: 19px;
+  color: var(--accent-1);
+}
+
+.wp-pill-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.wp-pill button {
+  flex: none;
+  padding: 8px 15px;
+  border-radius: 99px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+}
+
+@media (min-width: 761px) {
+  .wp-pill {
+    left: 440px;
+    right: 20px;
+    max-width: 460px;
+  }
+}
+
+.pill-enter-active,
+.pill-leave-active {
+  transition: opacity 0.28s, translate 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.pill-enter-from,
+.pill-leave-to {
+  opacity: 0;
+  translate: 0 14px;
 }
 
 

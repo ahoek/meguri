@@ -329,6 +329,9 @@ export async function generate({ shuffle = false } = {}) {
     showError('errNoStart')
     return
   }
+  // Whatever stops you wanted are placed; leaving the map armed would turn
+  // the next tap on your new loop into a fourth one.
+  store.waypointMode = false
   if (shuffle) {
     store.bearing = Math.random() * 360
     store.clockwise = Math.random() < 0.5
