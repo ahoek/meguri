@@ -11,7 +11,12 @@ import {
   AT_START_M,
 } from '../domain/navigation'
 import { speakManeuver, resetSpeech } from './guidance'
-import { startCompass, stopCompass, compassHeading } from '../infra/compass'
+import {
+  startCompass,
+  stopCompass,
+  compassHeading,
+  compassStatus,
+} from '../infra/compass'
 import { routeBetween } from '../infra/brouter'
 import { distanceKm } from '../domain/geo'
 import type { LngLat } from '../domain/geo'
@@ -437,6 +442,24 @@ export function stopNavigation() {
  */
 export function deviceHeading(): number | null {
   return profileMode === 'walk' ? compassHeading() : null
+}
+
+/** True while the compass is the thing steering the arrow. */
+export function usingCompass() {
+  return profileMode === 'walk'
+}
+
+export { compassStatus }
+
+/**
+ * Ask again, from a fresh tap.
+ *
+ * iOS remembers a refusal per origin and will not prompt a second time, and a
+ * session resumed on page load never had a gesture to ask from in the first
+ * place. Either way the only route back is the rider tapping something.
+ */
+export function retryCompass() {
+  return startCompass()
 }
 
 /** How much of the gap to a fresh fix to close per frame, and how far we may

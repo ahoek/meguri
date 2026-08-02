@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { store } from '../app/store'
-import { nav, stopNavigation, setVoice } from '../app/nav-session'
+import {
+  nav,
+  stopNavigation,
+  setVoice,
+  compassStatus,
+  retryCompass,
+  usingCompass,
+} from '../app/nav-session'
 import { primeSpeech, chooseVoice } from '../app/guidance'
 import { allVoices, voiceChoice } from '../infra/speech'
 import { locale, t } from '../i18n'
@@ -143,6 +150,36 @@ onBeforeUnmount(() => {
   store.bannerInset = 0
 })
 
+/**
+ * On foot the arrow is supposed to follow the compass. When it can't, say so
+ * — every failure looks the same from the pavement, and the first version
+ * shipped with all of them silent.
+ */
+// Installed to the home screen, iOS remembers a refusal for the origin and
+// will not prompt again however many times we ask — so there the honest
+// advice is to reinstall, which does reset it, rather than a button that
+// cannot work. In Safari the retry is real.
+const standalone =
+  matchMedia('(display-mode: standalone)').matches ||
+  (navigator as { standalone?: boolean }).standalone === true
+
+const compassProblem = computed(() => {
+  if (!usingCompass()) return null
+  switch (compassStatus.value) {
+    case 'denied':
+    case 'off':
+      return standalone
+        ? { text: t('compassReinstall'), retry: false }
+        : { text: t('compassDenied'), retry: true }
+    case 'unsupported':
+      return { text: t('compassUnsupported'), retry: false }
+    case 'silent':
+      return { text: t('compassSilent'), retry: false }
+    default:
+      return null
+  }
+})
+
 const progress = computed(() => {
   const total = nav.alongKm + nav.remainingKm
   return total ? Math.min(100, (nav.alongKm / total) * 100) : 0
@@ -201,6 +238,22 @@ const progress = computed(() => {
     </div>
 
     <div class="bottom">
+    <Transition name="compass">
+      <component
+        :is="compassProblem?.retry ? 'button' : 'p'"
+        v-if="compassProblem"
+        class="compass-note"
+        :class="{ actionable: compassProblem.retry }"
+        @click="compassProblem.retry && retryCompass()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="m15 9-2.2 5-4.8 1 2.2-5z" fill="currentColor" />
+        </svg>
+        {{ compassProblem.text }}
+      </component>
+    </Transition>
+
     <!-- Voice and recenter float above the bar so the figures below can be
          big enough to read from a bike. -->
     <div class="side-actions">
@@ -454,6 +507,50 @@ const progress = computed(() => {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
+}
+
+/* ---- compass trouble ---- */
+.compass-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 calc(12px + env(safe-area-inset-right)) 10px
+    calc(12px + env(safe-area-inset-left));
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(1.6);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  color: var(--ink-2);
+}
+
+.compass-note svg {
+  flex: none;
+  width: 19px;
+  height: 19px;
+  color: #b45309;
+}
+
+.compass-note.actionable {
+  color: var(--ink);
+  border-color: #b45309;
+}
+
+.compass-enter-active,
+.compass-leave-active {
+  transition: opacity 0.25s, translate 0.25s;
+}
+
+.compass-enter-from,
+.compass-leave-to {
+  opacity: 0;
+  translate: 0 8px;
 }
 
 .side-actions {
