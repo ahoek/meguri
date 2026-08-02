@@ -952,6 +952,7 @@ const routeStats = computed(() => {
 .target {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
 }
 
@@ -969,6 +970,10 @@ const routeStats = computed(() => {
 .target-hint {
   font-size: 13.5px;
   color: var(--ink-3);
+  /* Pinned to the right edge so it holds still while the value ("5 km" →
+     "5,5 km") changes width during a drag. */
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- slider ---- */
