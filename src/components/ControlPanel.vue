@@ -285,7 +285,6 @@ const routeStats = computed(() => {
       </svg>
       <div class="brand-text">
         <h1>Meguri</h1>
-        <p>{{ t('tagline') }}</p>
       </div>
       <div class="lang" role="radiogroup" aria-label="Language / Taal / 言語">
         <button
@@ -486,8 +485,6 @@ const routeStats = computed(() => {
         </option>
       </select>
     </label>
-
-    <p class="quiet-note">{{ t('quietNote') }}</p>
 
     <Transition name="rise">
       <div v-if="routeStats" class="result-card">
@@ -704,11 +701,6 @@ const routeStats = computed(() => {
   letter-spacing: -0.02em;
 }
 
-.brand p {
-  margin: 1px 0 0;
-  font-size: 13px;
-  color: var(--ink-3);
-}
 
 .lang {
   display: flex;
@@ -1159,12 +1151,6 @@ const routeStats = computed(() => {
   font-size: 13.5px;
 }
 
-.quiet-note {
-  margin: -10px 0 0;
-  font-size: 12px;
-  color: var(--ink-3);
-  text-align: center;
-}
 
 /* ---- nature toggle ---- */
 .nature-row {

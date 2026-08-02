@@ -74,7 +74,9 @@ export const nav = reactive<NavState>({
   maneuver: null, // { kind, distanceM, exit }
   offRoute: false,
   arrived: false,
-  voice: localStorage.getItem('meguri-voice') !== 'off',
+  // Off unless the rider turned it on before: speaking up uninvited is worse
+  // than staying quiet until asked.
+  voice: localStorage.getItem('meguri-voice') === 'on',
   rejoin: null, // { coordinates, distanceKm } path back after a wrong turn
   rejoining: false,
 })
