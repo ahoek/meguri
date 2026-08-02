@@ -120,4 +120,47 @@ describe('waypoints', () => {
 
     expect(requested[0]).toContainEqual(wp)
   })
+
+  // a nature reserve is reached down one access road and left the same way. The spur
+  // trimmer saw that as backtracking and cut it, so the loop rolled past on
+  // the through-road a hundred-odd metres short of the pin. A stop the rider
+  // asked for outranks both the length target and the no-backtracking rule.
+  it('keeps the leg that reaches a stop, even though it doubles back', async () => {
+    const b = offset(ORIGIN, 0, 100)
+    const tip = offset(b, 60, 0) // down a dead end
+    const coords = [ORIGIN, b, tip, b, offset(b, 0, 100)]
+
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      waypoints: [offset(tip, 6, 0)], // the pin, a few metres off the routed tip
+      routeThrough: async () => routeOf(coords),
+    })
+
+    const closest = Math.min(
+      ...route.geometry.coordinates.map((p) => metresBetween(p, tip)),
+    )
+    expect(closest).toBeLessThan(1)
+    expect(route.geometry.coordinates).toHaveLength(coords.length)
+  })
+
+  // Without a pin on it, the very same dead end is still just backtracking.
+  it('still trims a dead end that no stop asked for', async () => {
+    const b = offset(ORIGIN, 0, 100)
+    const tip = offset(b, 60, 0)
+    const coords = [ORIGIN, b, tip, b, offset(b, 0, 100)]
+
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      waypoints: [offset(ORIGIN, 0, 50)], // a stop on the way in, not at the tip
+      routeThrough: async () => routeOf(coords),
+    })
+
+    expect(route.geometry.coordinates).toHaveLength(3)
+  })
 })

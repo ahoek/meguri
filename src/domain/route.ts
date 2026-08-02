@@ -22,14 +22,45 @@ export type RouteThrough = (points: LngLat[]) => Promise<Route>
 
 const samePoint = (a: LngLat, b: LngLat) => a[0] === b[0] && a[1] === b[1]
 
+const pointKey = (p: LngLat) => `${p[0]},${p[1]}`
+
+/** Metres from `point` to the nearest vertex of `coords`. */
+function nearestVertexM(coords: LngLat[], point: LngLat): number {
+  let best = Infinity
+  for (const c of coords) {
+    const d = distanceKm(c, point)
+    if (d < best) best = d
+  }
+  return best * 1000
+}
+
+/** The vertex of `coords` closest to `point` — where the router actually got. */
+function nearestVertex(coords: LngLat[], point: LngLat): LngLat {
+  let best = coords[0]
+  let bestKm = Infinity
+  for (const c of coords) {
+    const d = distanceKm(c, point)
+    if (d < bestKm) {
+      bestKm = d
+      best = c
+    }
+  }
+  return best
+}
+
 /**
  * Remove out-and-back spurs (A → T → A dead-end tips). The loop stays intact
  * and endpoints are preserved — a shorter route beats backtracking.
  *
+ * `keep` holds coordinates that must survive whatever it costs in doubled
+ * road. A stop the rider asked for is often down a dead end, a pier or a
+ * park path, and reaching it means coming back out the same way; trimming
+ * that leg left the loop passing a hundred metres from the pin.
+ *
  * Returns the trimmed points plus `origin`, mapping each surviving point back
  * to its index in the input, so turn instructions can be re-indexed.
  */
-function trimSpurs(coords: LngLat[]) {
+function trimSpurs(coords: LngLat[], keep: ReadonlySet<string> = new Set()) {
   let pts = coords
   let origin = coords.map((_, i) => i)
   let changed = true
@@ -43,8 +74,15 @@ function trimSpurs(coords: LngLat[]) {
         changed = true
         continue
       }
-      if (out.length > 1 && samePoint(out[out.length - 2], pts[i])) {
-        out.pop() // U-turn tip: drop it, the incoming point already follows
+      // U-turn tip: drop it, the incoming point already follows. Protection
+      // is by coordinate, so dropping a duplicate above can't quietly strand
+      // a stop by losing the index that vouched for it.
+      if (
+        out.length > 1 &&
+        samePoint(out[out.length - 2], pts[i]) &&
+        !keep.has(pointKey(prev))
+      ) {
+        out.pop()
         outOrigin.pop()
         changed = true
         continue
@@ -73,6 +111,10 @@ function overlapFraction(coords: LngLat[]) {
   }
   return total ? repeated / total : 0
 }
+
+// How much closer the untrimmed route got to a stop before we count the stop
+// as lost. Rounding and a dropped duplicate vertex are worth a few metres.
+const TRIM_SLACK_M = 25
 
 function polylineKm(coords: LngLat[]) {
   let total = 0
@@ -134,7 +176,12 @@ export async function generateLoop({
       continue
     }
 
-    const { points: trimmed, origin } = trimSpurs(route.geometry.coordinates)
+    // What the router managed for each stop, before anything is taken away.
+    const routed = route.geometry.coordinates
+    const reachedM = waypoints.map((w) => nearestVertexM(routed, w))
+    const keep = new Set(waypoints.map((w) => pointKey(nearestVertex(routed, w))))
+
+    const { points: trimmed, origin } = trimSpurs(routed, keep)
     if (trimmed.length < route.geometry.coordinates.length) {
       const newKm = polylineKm(trimmed)
       route.durationSec *= newKm / route.distanceKm
@@ -149,16 +196,32 @@ export async function generateLoop({
     }
 
     const distErr = Math.abs(route.distanceKm - targetKm) / targetKm
-    const overlap = overlapFraction(route.geometry.coordinates)
+
+    // Doubling back to reach a stop is the price of asking for it, so it is
+    // not held against the loop — otherwise the search spends its attempts
+    // hunting a shape with no backtracking, which for a pin down a dead end
+    // does not exist. Measured on the route with every spur removed, which
+    // is what the ride would look like without the stops.
+    const bare = waypoints.length ? trimSpurs(routed).points : route.geometry.coordinates
+    const overlap = overlapFraction(bare)
+
+    // Reaching the stops is not negotiable. Compared against what the router
+    // itself achieved, not an absolute distance: a pin dropped in the middle
+    // of a field is as reached as it will ever be once the loop is on the
+    // nearest path.
+    const missed = waypoints.filter(
+      (w, i) => nearestVertexM(route.geometry.coordinates, w) > reachedM[i] + TRIM_SLACK_M,
+    ).length
+
     // Riding the same road twice annoys more than a kilometre missing, so
-    // overlap dominates the score.
-    const score = distErr + overlap * 4
+    // overlap dominates the score — but a missed stop outranks them both.
+    const score = missed * 100 + distErr + overlap * 4
 
     if (score < bestScore) {
       best = route
       bestScore = score
     }
-    if (distErr < 0.06 && overlap < 0.08) break
+    if (!missed && distErr < 0.06 && overlap < 0.08) break
     // With nothing left to remove, over-target means the waypoints themselves
     // demand the distance — a clean loop through them is as good as it gets.
     if (
