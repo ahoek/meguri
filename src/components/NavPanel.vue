@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { nav, stopNavigation, setVoice } from '../lib/nav-session'
-import { primeSpeech } from '../lib/speech'
+import {
+  primeSpeech,
+  availableVoices,
+  voiceChoice,
+  setChosenVoice,
+} from '../lib/speech'
 import { locale, t } from '../i18n'
 import { localNumber } from '../lib/format'
 
@@ -84,6 +89,37 @@ function onVoiceToggle() {
   setVoice(!nav.voice)
 }
 
+// Long-pressing the voice button opens the voice picker; a short tap keeps
+// toggling. The release of a long press still fires a click, so it is eaten.
+const voiceMenuOpen = ref(false)
+const chosenVoiceURI = computed(() => voiceChoice.value[locale.value] ?? '')
+let pressTimer: ReturnType<typeof setTimeout> | undefined
+let longPressed = false
+
+function onVoicePressStart() {
+  longPressed = false
+  clearTimeout(pressTimer)
+  if (availableVoices.value.length < 2) return // nothing to choose from
+  pressTimer = setTimeout(() => {
+    longPressed = true
+    voiceMenuOpen.value = true
+  }, 500)
+}
+
+function onVoicePressEnd() {
+  clearTimeout(pressTimer)
+}
+
+function onVoiceClick() {
+  if (longPressed) return
+  onVoiceToggle()
+}
+
+function chooseVoice(uri: string) {
+  setChosenVoice(uri) // speaks a sample, so no guessing which voice this is
+  voiceMenuOpen.value = false
+}
+
 const progress = computed(() => {
   const total = nav.alongKm + nav.remainingKm
   return total ? Math.min(100, (nav.alongKm / total) * 100) : 0
@@ -139,13 +175,40 @@ const progress = computed(() => {
     <!-- Voice and recenter float above the bar so the figures below can be
          big enough to read from a bike. -->
     <div class="side-actions">
+      <div v-if="voiceMenuOpen" class="voice-backdrop" @click="voiceMenuOpen = false"></div>
+      <div v-if="voiceMenuOpen" class="voice-menu" role="menu" :aria-label="t('voiceLabel')">
+        <p class="voice-menu-title">{{ t('voiceLabel') }}</p>
+        <button
+          role="menuitemradio"
+          :aria-checked="chosenVoiceURI === ''"
+          :class="{ active: chosenVoiceURI === '' }"
+          @click="chooseVoice('')"
+        >
+          {{ t('voiceAuto') }}
+        </button>
+        <button
+          v-for="v in availableVoices"
+          :key="v.voiceURI"
+          role="menuitemradio"
+          :aria-checked="chosenVoiceURI === v.voiceURI"
+          :class="{ active: chosenVoiceURI === v.voiceURI }"
+          @click="chooseVoice(v.voiceURI)"
+        >
+          {{ v.name }}
+        </button>
+      </div>
       <button
         class="round-btn"
         :class="{ on: nav.voice }"
         :aria-label="t('navVoice')"
         :aria-pressed="nav.voice"
         :title="t('navVoice')"
-        @click="onVoiceToggle"
+        @click="onVoiceClick"
+        @pointerdown="onVoicePressStart"
+        @pointerup="onVoicePressEnd"
+        @pointerleave="onVoicePressEnd"
+        @pointercancel="onVoicePressEnd"
+        @contextmenu.prevent
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="currentColor" />
@@ -358,11 +421,60 @@ const progress = computed(() => {
 }
 
 .side-actions {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   align-self: flex-end;
   margin: 0 calc(14px + env(safe-area-inset-right)) 12px 0;
+}
+
+/* ---- voice picker (long-press on the voice button) ---- */
+.voice-backdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.voice-menu {
+  position: absolute;
+  right: 62px;
+  bottom: 0; /* grow upward, over the map rather than into the dash */
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--surface);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+}
+
+.voice-menu-title {
+  margin: 2px 10px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-3);
+}
+
+.voice-menu button {
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.voice-menu button.active {
+  background: var(--accent-soft);
+  color: var(--accent-1);
+  font-weight: 700;
 }
 
 .round-btn {

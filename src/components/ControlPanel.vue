@@ -15,12 +15,7 @@ import {
 import { searchPlaces } from '../lib/geocode'
 import { downloadGpx } from '../lib/gpx'
 import { startNavigation } from '../lib/nav-session'
-import {
-  primeSpeech,
-  availableVoices,
-  voiceChoice,
-  setChosenVoice,
-} from '../lib/speech'
+import { primeSpeech } from '../lib/speech'
 import { LOCALES, locale, setLocale, t } from '../i18n'
 import type { PlaceResult } from '../lib/geocode'
 import { localNumber } from '../lib/format'
@@ -228,9 +223,6 @@ const wpHint = computed(() => {
   return `${n} ${t(n === 1 ? 'wpStop' : 'wpStops')}`
 })
 
-// Only worth a row when there is an actual choice to make.
-const chosenVoiceURI = computed(() => voiceChoice.value[locale.value] ?? '')
-const hasVoiceChoice = computed(() => availableVoices.value.length > 1)
 
 const routeStats = computed(() => {
   if (!store.route) return null
@@ -468,25 +460,6 @@ const routeStats = computed(() => {
         :checked="store.nature"
         @change="setNature(($event.target as HTMLInputElement).checked)"
       />
-    </label>
-
-    <label v-if="hasVoiceChoice" class="voice-row">
-      <svg class="voice-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="currentColor" />
-        <path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      </svg>
-      <span class="voice-text">{{ t('voiceLabel') }}</span>
-      <select
-        class="voice-select"
-        :value="chosenVoiceURI"
-        :aria-label="t('voiceLabel')"
-        @change="setChosenVoice(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="">{{ t('voiceAuto') }}</option>
-        <option v-for="v in availableVoices" :key="v.voiceURI" :value="v.voiceURI">
-          {{ v.name }}
-        </option>
-      </select>
     </label>
 
     <Transition name="rise">
@@ -1124,41 +1097,6 @@ const routeStats = computed(() => {
   color: var(--ink-2);
   background: var(--surface-solid);
   border: 1px solid var(--hairline);
-}
-
-/* ---- voice choice ---- */
-.voice-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 15px;
-  border-radius: 15px;
-  background: var(--field);
-}
-
-.voice-icon {
-  flex: none;
-  width: 21px;
-  height: 21px;
-  color: var(--ink-3);
-}
-
-.voice-text {
-  flex: none;
-  font-size: 14.5px;
-  font-weight: 600;
-}
-
-.voice-select {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  background: var(--surface-solid);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13.5px;
 }
 
 
