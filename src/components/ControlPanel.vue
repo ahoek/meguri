@@ -150,19 +150,29 @@ const routeStats = computed(() => {
 
 <template>
   <section class="panel" :class="{ collapsed }" aria-label="Route planner">
-    <button
-      class="sheet-handle"
-      :aria-expanded="!collapsed"
-      :aria-label="t('panelToggle')"
-      @click="collapsed = !collapsed"
-      @touchstart.passive="onHandleTouchStart"
-      @touchend="onHandleTouchEnd"
-    >
-      <span class="grabber" aria-hidden="true"></span>
-      <span v-if="collapsed && routeStats" class="mini-stats">
-        {{ routeStats.distance }} · {{ routeStats.duration }}
-      </span>
-    </button>
+    <div class="sheet-top">
+      <button
+        class="sheet-handle"
+        :aria-expanded="!collapsed"
+        :aria-label="t('panelToggle')"
+        @click="collapsed = !collapsed"
+        @touchstart.passive="onHandleTouchStart"
+        @touchend="onHandleTouchEnd"
+      >
+        <span class="grabber" aria-hidden="true"></span>
+        <span v-if="collapsed && routeStats" class="mini-stats">
+          {{ routeStats.distance }} · {{ routeStats.duration }}
+        </span>
+      </button>
+      <!-- The sheet collapses as soon as a route lands, so starting must not
+           require digging the result card back out. -->
+      <button v-if="collapsed && routeStats" class="mini-start" @click="onStartNavigation">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
+        </svg>
+        {{ t('navStart') }}
+      </button>
+    </div>
 
     <div class="sheet-body">
     <header class="brand">
@@ -426,7 +436,7 @@ const routeStats = computed(() => {
   }
 }
 
-.sheet-handle {
+.sheet-top {
   display: none;
 }
 
@@ -462,17 +472,44 @@ const routeStats = computed(() => {
     padding-bottom: calc(22px + env(safe-area-inset-bottom));
   }
 
+  .sheet-top {
+    display: flex;
+    align-items: center;
+    flex: none;
+    height: var(--handle-h);
+  }
+
   .sheet-handle {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    flex: none;
-    height: var(--handle-h);
-    width: 100%;
+    flex: 1;
+    align-self: stretch;
+    min-width: 0;
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
+  }
+
+  .mini-start {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    margin-right: 12px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+    box-shadow: 0 6px 16px -6px var(--accent-1);
+  }
+
+  .mini-start svg {
+    width: 16px;
+    height: 16px;
   }
 
   .grabber {
@@ -1023,27 +1060,19 @@ const routeStats = computed(() => {
   font-size: 15.5px;
   font-weight: 700;
   color: #fff;
-  background: var(--ink);
+  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  box-shadow: 0 8px 22px -6px var(--accent-1);
   transition: transform 0.15s, filter 0.2s;
 }
 
 .nav-cta:hover {
   transform: translateY(-1px);
-  filter: brightness(1.15);
+  filter: brightness(1.06);
 }
 
 .nav-cta svg {
   width: 18px;
   height: 18px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .nav-cta {
-    /* Explicit ink, not var(--ink): in dark mode that resolves to the same
-       near-white as the background and the label vanishes. */
-    color: #0c111b;
-    background: #eef2f8;
-  }
 }
 
 .result-actions {
