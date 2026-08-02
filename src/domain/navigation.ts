@@ -54,6 +54,15 @@ function isGentleBend(maneuver: Maneuver) {
 const rad = (d: number) => (d * Math.PI) / 180
 const deg = (r: number) => (r * 180) / Math.PI
 
+/**
+ * Signed degrees from one bearing to another, taking the short way round.
+ * Easing towards a raw difference spins almost the whole way back whenever a
+ * turn crosses north.
+ */
+export function shortestTurn(from: number, to: number): number {
+  return ((((to - from) % 360) + 540) % 360) - 180
+}
+
 /** Initial bearing in degrees from a to b. */
 export function bearingBetween([lng1, lat1]: LngLat, [lng2, lat2]: LngLat): number {
   const φ1 = rad(lat1)

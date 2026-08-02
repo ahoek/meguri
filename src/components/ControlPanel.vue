@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   store,
   RANGES,
@@ -13,30 +13,26 @@ import {
   clearWaypoints,
   removeWaypoint,
 } from '../app/store'
-import { searchPlaces } from '../infra/nominatim'
 import { downloadGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
 import { primeSpeech } from '../app/guidance'
 import { checkForUpdates } from '../infra/pwa'
 import { LOCALES, locale, setLocale, t } from '../i18n'
-import type { PlaceResult } from '../infra/nominatim'
 import { localNumber } from '../domain/format'
+import type { LngLat } from '../domain/geo'
+import { useBottomSheet } from '../composables/useBottomSheet'
+import { usePlaceSearch } from '../composables/usePlaceSearch'
 
-const query = ref('')
-const results = ref<PlaceResult[]>([])
-const searching = ref(false)
-const listOpen = ref(false)
-let debounceTimer: ReturnType<typeof setTimeout> | undefined
-let searchAbort: AbortController | null = null
-
-// Mobile bottom sheet: collapse to a slim bar so the route stays visible.
-const collapsed = ref(false)
-const isMobile = () => matchMedia('(max-width: 760px)').matches
-const panelEl = ref<HTMLElement | null>(null)
-const sheetTopEl = ref<HTMLElement | null>(null)
-// The strip grows by the home-indicator clearance on phones with rounded
-// corners, so measure it rather than assuming the base height.
-const handleH = () => sheetTopEl.value?.offsetHeight ?? 30
+const { query, results, searching, listOpen, reset: resetSearch } = usePlaceSearch()
+const {
+  collapsed,
+  panelEl,
+  sheetTopEl,
+  isMobile,
+  onHandleTouchStart,
+  onHandleTouchMove,
+  onHandleTouchEnd,
+} = useBottomSheet()
 
 watch(
   () => store.route,
@@ -52,113 +48,8 @@ watch(
   },
 )
 
-// The sheet tracks the finger while dragging and snaps on release, judged by
-// flick velocity first and position second — the fixed-threshold swipe it
-// replaces ignored both, which is what made it feel non-native.
-const collapsedOffset = () => (panelEl.value?.offsetHeight ?? 0) - handleH()
-
-interface SheetDrag {
-  startY: number
-  base: number
-  offset: number | null
-  lastY: number
-  lastT: number
-  velocity: number
-}
-let drag: SheetDrag | null = null
-
-function onHandleTouchStart(e: TouchEvent) {
-  drag = {
-    startY: e.touches[0].clientY,
-    base: collapsed.value ? collapsedOffset() : 0,
-    offset: null,
-    lastY: e.touches[0].clientY,
-    lastT: performance.now(),
-    velocity: 0,
-  }
-  panelEl.value?.classList.add('dragging')
-}
-
-function onHandleTouchMove(e: TouchEvent) {
-  if (!drag) return
-  const y = e.touches[0].clientY
-  const now = performance.now()
-  if (now > drag.lastT) drag.velocity = (y - drag.lastY) / (now - drag.lastT)
-  drag.lastY = y
-  drag.lastT = now
-
-  const max = collapsedOffset()
-  let offset = drag.base + (y - drag.startY)
-  // Rubber-band past the ends instead of stopping dead.
-  if (offset < 0) offset *= 0.18
-  else if (offset > max) offset = max + (offset - max) * 0.18
-  drag.offset = offset
-  if (panelEl.value) panelEl.value.style.transform = `translateY(${offset}px)`
-}
-
-function onHandleTouchEnd(e: TouchEvent) {
-  if (!drag) return
-  const d = drag
-  drag = null
-  panelEl.value?.classList.remove('dragging')
-  if (panelEl.value) panelEl.value.style.transform = ''
-  // Barely moved: it's a tap, and the click handler will toggle.
-  if (d.offset == null || Math.abs(d.lastY - d.startY) < 6) return
-  e.preventDefault() // a real drag must not also fire the click toggle
-  collapsed.value =
-    Math.abs(d.velocity) > 0.35 ? d.velocity > 0 : d.offset > collapsedOffset() / 2
-}
-
-// Tell the map how much of the viewport the sheet is covering, so it can
-// centre things in the strip that stays visible.
-function publishInset() {
-  if (!isMobile()) {
-    store.sheetInset = 0
-    return
-  }
-  store.sheetInset = collapsed.value
-    ? handleH()
-    : (panelEl.value?.offsetHeight ?? handleH())
-}
-
-watch(collapsed, publishInset)
-let insetObserver: ResizeObserver | null = null
-onMounted(() => {
-  publishInset()
-  insetObserver = new ResizeObserver(publishInset)
-  if (panelEl.value) insetObserver.observe(panelEl.value)
-})
-onBeforeUnmount(() => {
-  insetObserver?.disconnect()
-  store.sheetInset = 0
-})
-
-watch(query, (q) => {
-  clearTimeout(debounceTimer)
-  searchAbort?.abort()
-  if (q.trim().length < 3) {
-    results.value = []
-    listOpen.value = false
-    return
-  }
-  debounceTimer = setTimeout(async () => {
-    searching.value = true
-    searchAbort = new AbortController()
-    try {
-      results.value = await searchPlaces(q, searchAbort.signal, locale.value)
-      listOpen.value = results.value.length > 0
-    } catch {
-      /* aborted or offline — keep quiet */
-    } finally {
-      searching.value = false
-    }
-  }, 350)
-})
-
-function pickResult(result: PlaceResult) {
-  listOpen.value = false
-  query.value = ''
-  results.value = []
+function pickResult(result: { lngLat: LngLat; label: string }) {
+  resetSearch()
   setStart(result.lngLat, result.label, { fly: true })
 }
 
@@ -720,7 +611,7 @@ const routeStats = computed(() => {
     font-size: 13.5px;
     font-weight: 700;
     color: #fff;
-    background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+    background: var(--accent-gradient);
     box-shadow: 0 6px 16px -6px var(--accent-1);
   }
 
@@ -742,7 +633,7 @@ const routeStats = computed(() => {
     font-weight: 700;
     letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
-    background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+    background: var(--accent-gradient);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -1000,7 +891,7 @@ const routeStats = computed(() => {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient-135);
 }
 
 .hint {
@@ -1045,7 +936,7 @@ const routeStats = computed(() => {
   font-size: 34px;
   font-weight: 700;
   letter-spacing: -0.03em;
-  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -1110,7 +1001,7 @@ const routeStats = computed(() => {
   font-size: 16px;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient);
   box-shadow: 0 8px 22px -6px var(--accent-1);
   transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
 }
@@ -1215,7 +1106,7 @@ const routeStats = computed(() => {
 .wp-toggle.on {
   color: #fff;
   border-color: transparent;
-  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient);
 }
 
 .wp-list {
@@ -1327,7 +1218,7 @@ const routeStats = computed(() => {
   font-size: 13.5px;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient);
 }
 
 @media (min-width: 761px) {
@@ -1424,7 +1315,7 @@ const routeStats = computed(() => {
 }
 
 .switch:checked {
-  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient);
 }
 
 .switch:checked::after {
@@ -1476,7 +1367,7 @@ const routeStats = computed(() => {
   font-size: 15.5px;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(100deg, var(--accent-1), var(--accent-2));
+  background: var(--accent-gradient);
   box-shadow: 0 8px 22px -6px var(--accent-1);
   transition: transform 0.15s, filter 0.2s;
 }

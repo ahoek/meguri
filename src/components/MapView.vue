@@ -15,117 +15,48 @@ import {
   currentIndex,
   deviceHeading,
   reckoning,
+  projectedPosition,
 } from '../app/nav-session'
-import {
-  traveledLine,
-  positionAtKm,
-  bearingAlong,
-  segmentBearingAt,
-} from '../domain/navigation'
+import { traveledLine } from '../domain/navigation'
+import { createStyleTweaks } from '../map/style'
+import { createRouteLayers, ll } from '../map/route-layers'
+import { createMarkers } from '../map/markers'
+import { createPuck } from '../map/puck'
+import { createFollowCamera } from '../map/follow'
 import { locale, t } from '../i18n'
 import type { LngLat } from '../domain/geo'
-import type { Route, Profile } from '../domain/route'
+import type { Route } from '../domain/route'
+import type { Projection } from '../app/nav-session'
 
 const container = ref<HTMLElement | null>(null)
 let map: maplibregl.Map
-let marker: maplibregl.Marker | null = null
-let animationFrame = 0
+let drawFrame = 0
 let resizeObserver: ResizeObserver | null = null
-let puck: maplibregl.Marker | null = null
-let followCamera = true
-// True while fingers rest on the map. Each jumpTo resets MapLibre's gesture
-// handlers, so with the follow loop writing the camera every frame a touch
-// pan could never accumulate enough movement to start (mouse drags activate
-// on the first move, which is why panning only failed on the phone). Hold the
-// camera still while touched and let the gesture events decide what follows.
-let touchesDown = false
 
-const EMPTY = { type: 'FeatureCollection' as const, features: [] }
+// Built once the map exists; every one of these owns its own state.
+let styleTweaks: ReturnType<typeof createStyleTweaks>
+let layers: ReturnType<typeof createRouteLayers>
+let markers: ReturnType<typeof createMarkers>
+let puck: ReturnType<typeof createPuck>
+let camera: ReturnType<typeof createFollowCamera>
 
-// Route coordinates may carry elevation; MapLibre wants a bare pair.
-const ll = ([lng, lat]: LngLat): [number, number] => [lng, lat]
+// Walking needs to see the next side street; cycling covers ground faster
+// and wants a little more look-ahead.
+const NAV_ZOOM = { walk: 20.4, bike: 20 }
 
 defineExpose({
   recenter() {
     // Glide back from wherever the user panned to: seed the eased camera
     // with the current view and let the follow loop close the gap.
-    const centre = map.getCenter()
-    cam.lng = centre.lng
-    cam.lat = centre.lat
-    cam.bearing = map.getBearing()
-    cam.valid = true
-    followCamera = true
-    framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() }
-    startFollowing()
+    camera.seedFromView()
+    camera.setFraming({ zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() })
+    camera.start()
   },
 })
-
-const GRADIENTS: Record<Profile, [string, string]> = {
-  walk: ['#059669', '#84cc16'],
-  bike: ['#6366f1', '#ec4899'],
-}
-
-function lineGradient(mode: Profile): maplibregl.ExpressionSpecification {
-  const [from, to] = GRADIENTS[mode]
-  return ['interpolate', ['linear'], ['line-progress'], 0, from, 1, to]
-}
-
-// A path you can walk two abreast on. Drawn to that width on the ground
-// rather than to a pixel count, so it reads as a real path at every zoom
-// instead of a ribbon that swallows the street when you zoom in.
-const PATH_WIDTH_M = 1.5
-const CASING_WIDTH_M = 2.3
-const EQUATOR_M_PER_PX = 156543.03392 // at zoom 0, 256 px tiles
-
-/**
- * Line width held constant on the ground.
- *
- * Metres per pixel halve with every zoom level, so a fixed ground width
- * doubles — which is exactly what an exponential-base-2 interpolation between
- * two stops produces. Below `minPx` the line would be thinner than a hairline
- * and the loop would vanish from the planner, so it flattens out there.
- */
-function groundWidth(metres: number, lat: number, minPx: number) {
-  const perPx = EQUATOR_M_PER_PX * Math.cos((lat * Math.PI) / 180)
-  const pxAt = (zoom: number) => (metres * Math.pow(2, zoom)) / perPx
-  // The zoom at which the true width overtakes the floor.
-  const pinned = Math.log2((minPx * perPx) / metres)
-  return [
-    'interpolate',
-    ['exponential', 2],
-    ['zoom'],
-    0,
-    minPx,
-    pinned,
-    minPx,
-    22,
-    pxAt(22),
-  ] as maplibregl.ExpressionSpecification
-}
 
 /** Latitude the route sits at — width in metres depends on where you are. */
 function routeLat() {
   return store.route?.geometry.coordinates[0]?.[1] ?? store.start?.lngLat[1] ?? 52
-}
-
-function applyPathWidths() {
-  const lat = routeLat()
-  const line = groundWidth(PATH_WIDTH_M, lat, 5)
-  const casing = groundWidth(CASING_WIDTH_M, lat, 8)
-  if (map.getLayer('route-line')) map.setPaintProperty('route-line', 'line-width', line)
-  if (map.getLayer('route-casing')) map.setPaintProperty('route-casing', 'line-width', casing)
-  if (map.getLayer('traveled-line')) map.setPaintProperty('traveled-line', 'line-width', line)
-  if (map.getLayer('rejoin-line')) {
-    map.setPaintProperty('rejoin-line', 'line-width', groundWidth(PATH_WIDTH_M, lat, 4))
-  }
-}
-
-function routeFeature(coordinates: LngLat[]) {
-  return {
-    type: 'Feature' as const,
-    properties: {},
-    geometry: { type: 'LineString' as const, coordinates },
-  }
 }
 
 function fitPadding() {
@@ -138,79 +69,25 @@ function fitPadding() {
     : { top: 90, left: 470, right: 90, bottom: 90 }
 }
 
-function ensureMarker(lngLat: LngLat) {
-  if (!marker) {
-    const el = document.createElement('div')
-    el.className = 'start-marker'
-    el.addEventListener('click', (e) => e.stopPropagation())
-    const m = new maplibregl.Marker({ element: el, draggable: true })
-      .setLngLat(ll(lngLat))
-      .addTo(map)
-    m.on('dragend', () => {
-      const p = m.getLngLat()
-      setStart([p.lng, p.lat])
-    })
-    marker = m
-  } else {
-    marker.setLngLat(ll(lngLat))
-  }
-}
-
-function clearRoute() {
-  cancelAnimationFrame(animationFrame)
-  ;(map?.getSource('route') as maplibregl.GeoJSONSource | undefined)?.setData(EMPTY)
-}
-
-let wpMarkers: maplibregl.Marker[] = []
-// Letting go of a dragged marker also fires a click, which would delete the
-// stop you had just finished placing.
-let draggedAt = 0
-const DRAG_CLICK_GRACE_MS = 400
-
-/** Numbered pins for the stops; tap removes, drag moves. */
-function renderWaypoints() {
-  for (const m of wpMarkers) m.remove()
-  wpMarkers = []
-  if (nav.active) return
-  store.waypoints.forEach((lngLat, index) => {
-    const el = document.createElement('div')
-    el.className = 'wp-marker'
-    el.textContent = String(index + 1)
-    el.setAttribute('role', 'button')
-    el.title = `${t('wpRemove')} ${index + 1}`
-    el.setAttribute('aria-label', el.title)
-    el.addEventListener('click', (e) => {
-      e.stopPropagation()
-      if (performance.now() - draggedAt < DRAG_CLICK_GRACE_MS) return
-      removeWaypoint(index)
-    })
-    const marker = new maplibregl.Marker({ element: el, draggable: true })
-      .setLngLat(ll(lngLat))
-      .addTo(map)
-    marker.on('dragend', () => {
-      draggedAt = performance.now()
-      const p = marker.getLngLat()
-      moveWaypoint(index, [p.lng, p.lat])
-    })
-    wpMarkers.push(marker)
-  })
+/**
+ * Shift the camera centre downwards so the arrow sits near the bottom of the
+ * screen and the road ahead gets the space instead.
+ */
+function navPadding() {
+  const height = container.value?.clientHeight ?? window.innerHeight
+  const dash = 150
+  return { top: Math.round(height * 0.4) + dash, bottom: dash, left: 0, right: 0 }
 }
 
 function drawRoute(route: Route) {
-  cancelAnimationFrame(animationFrame)
+  cancelAnimationFrame(drawFrame)
   const coords = route.geometry.coordinates
-  const source = map.getSource('route') as maplibregl.GeoJSONSource
-  map.setPaintProperty('route-line', 'line-gradient', lineGradient(store.mode))
-  applyPathWidths() // metres per pixel depend on where the loop is
-
-  const bounds = coords.reduce(
-    (b, c) => b.extend(ll(c)),
-    new maplibregl.LngLatBounds(ll(coords[0]), ll(coords[0])),
-  )
-  map.fitBounds(bounds, { padding: fitPadding(), duration: 900 })
+  layers.setGradient(store.mode)
+  layers.applyWidths(routeLat()) // metres per pixel depend on where the loop is
+  map.fitBounds(layers.boundsOf(coords), { padding: fitPadding(), duration: 900 })
 
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    source.setData(routeFeature(coords))
+    layers.setRoute(coords)
     return
   }
 
@@ -221,303 +98,10 @@ function drawRoute(route: Route) {
     const t = Math.min(1, (now - startTime) / duration)
     const eased = 1 - Math.pow(1 - t, 3)
     const count = Math.max(2, Math.ceil(eased * coords.length))
-    source.setData(routeFeature(coords.slice(0, count)))
-    if (t < 1) animationFrame = requestAnimationFrame(step)
+    layers.setRoute(coords.slice(0, count))
+    if (t < 1) drawFrame = requestAnimationFrame(step)
   }
-  animationFrame = requestAnimationFrame(step)
-}
-
-// Driving infrastructure is clutter on foot or on a bike: it competes with
-// the route line and none of it is somewhere you're going.
-const CAR_POI_CLASSES = [
-  'parking',
-  'parking_garage',
-  'fuel',
-  'car',
-  'car_repair',
-  'car_parts',
-  'car_rental',
-  'car_wash',
-  'charging_station',
-  'motorcycle',
-  'driving_school',
-]
-const CAR_POI_SUBCLASSES = [
-  'parking',
-  'parking_garage',
-  'parking_space',
-  'parking_entrance',
-  'fuel',
-  'car',
-  'car_repair',
-  'car_parts',
-  'car_rental',
-  'car_wash',
-  'charging_station',
-  'motorcycle',
-  'tyres',
-]
-const POI_LAYERS = ['poi_r1', 'poi_r7', 'poi_r20']
-let basePoiFilters: Record<string, unknown> | null = null
-
-/** Hide car-only points of interest while navigating; restore them after. */
-function setCarPoisHidden(hidden: boolean) {
-  if (!basePoiFilters) {
-    basePoiFilters = {}
-    for (const id of POI_LAYERS) {
-      if (map.getLayer(id)) basePoiFilters[id] = map.getFilter(id) ?? null
-    }
-  }
-
-  const exclude = [
-    '!',
-    [
-      'any',
-      ['match', ['get', 'class'], CAR_POI_CLASSES, true, false],
-      ['match', ['get', 'subclass'], CAR_POI_SUBCLASSES, true, false],
-    ],
-  ]
-
-  for (const [id, base] of Object.entries(basePoiFilters)) {
-    if (!map.getLayer(id)) continue
-    if (!hidden) map.setFilter(id, base as maplibregl.FilterSpecification)
-    else {
-      map.setFilter(
-        id,
-        (base ? ['all', base, exclude] : exclude) as maplibregl.FilterSpecification,
-      )
-    }
-  }
-}
-
-/**
- * Drop the style's 3D buildings. At walking and cycling zoom they tower over
- * the pitched navigation view and hide the street you're meant to be on.
- */
-function removeExtrusions() {
-  for (const layer of map.getStyle()?.layers ?? []) {
-    if (layer.type === 'fill-extrusion') map.removeLayer(layer.id)
-  }
-}
-
-// Segment bearings step from one vertex to the next, and a mapped road can
-// kink by tens of degrees between them. Ease onto the target so the arrow
-// swings through a corner instead of flicking. Fast enough to stay honest —
-// on a straight it settles within a few frames.
-const PUCK_EASE = 0.14
-let puckAngle: number | null = null
-
-function ensurePuck(lngLat: LngLat, bearing: number | null) {
-  if (!puck) {
-    const el = document.createElement('div')
-    el.className = 'nav-puck'
-    el.innerHTML = '<span class="nav-puck-arrow"></span>'
-    // rotationAlignment 'map' ties the arrow to the world, so MapLibre backs
-    // out the map's own rotation. Rotating the element in screen space
-    // instead made it point the wrong way as soon as the map turned.
-    puck = new maplibregl.Marker({
-      element: el,
-      pitchAlignment: 'map',
-      rotationAlignment: 'map',
-    })
-      .setLngLat(ll(lngLat))
-      .addTo(map)
-  } else {
-    puck.setLngLat(ll(lngLat))
-  }
-  if (bearing == null) return
-
-  // Unwrap so a turn past north takes the short way round rather than
-  // spinning almost the whole way back.
-  puckAngle =
-    puckAngle == null
-      ? bearing
-      : puckAngle + shortestTurn(puckAngle, bearing) * PUCK_EASE
-  puck!.setRotation(puckAngle)
-}
-
-// Walking needs to see the next side street; cycling covers ground faster
-// and wants a little more look-ahead.
-const NAV_ZOOM = { walk: 20.4, bike: 20 }
-
-// Phones deliver a fix every one to several seconds. Easing to each arrival
-// stalls between them and then lurches, which is what made following feel
-// jerky — worst on a bike. Because we know the road ahead, we instead carry
-// the position forward along the route at the current pace and let each new
-// fix gently correct it.
-const FOLLOW_EASE = 0.12 // fraction of the remaining gap closed per frame
-// Turning is eased far more slowly than panning: the map swinging round at
-// the same rate it slides felt abrupt at corners. A compass bearing is a
-// different animal — it answers to your wrist, so it has to keep up.
-const BEARING_EASE = 0.035
-const COMPASS_BEARING_EASE = 0.14
-// The camera centre trails the shown position through this ease. While
-// riding the lag is under a metre, but after Recenter (or lifting a pinch)
-// it turns the snap back into a glide.
-const CENTER_EASE = 0.1
-const FRAMING_EASE = 0.05 // zoom, pitch and padding settling in or out
-// Carrying the position forward between fixes keeps motion continuous, but
-// every metre guessed is a metre that may have to be taken back when the next
-// fix lands. So guess briefly, conservatively, and never while stopped —
-// undershooting means corrections are always forward, which reads as motion
-// rather than as a jerk backwards.
-const MAX_DEAD_RECKON_S = 3
-const DEAD_RECKON_DAMPING = 0.5
-const MAX_DEAD_RECKON_KM = 0.012
-const MOVING_KMH = 1.5
-const cam = { lng: 0, lat: 0, bearing: 0, valid: false }
-// The position actually drawn: eased towards the projection so a correction
-// arrives as a slow slide rather than a snap.
-const shown = { lng: 0, lat: 0, valid: false }
-let followFrame = 0
-// The per-frame jumpTo would cancel any easeTo, so the navigation framing has
-// to be eased inside the same loop. Once it has settled we stop touching zoom
-// and pitch, leaving you free to pinch.
-interface Framing {
-  zoom: number
-  pitch: number
-  padding: { top: number; bottom: number; left: number; right: number }
-}
-let framing: Framing | null = null
-
-function shortestTurn(from: number, to: number) {
-  return ((((to - from) % 360) + 540) % 360) - 180
-}
-
-interface Projection {
-  position: LngLat
-  index: number
-  bearing: number | null
-  cameraBearing: number | null
-}
-
-/** Where we believe we are right now, between fixes. */
-function projectedNow(): Projection | null {
-  const prepared = preparedRoute()
-  if (!prepared) return null
-
-  // On foot this is the compass: the arrow points where you are facing, not
-  // where the road runs, so turning on the spot turns the map with you.
-  const device = deviceHeading()
-
-  if (nav.offRoute || !nav.fixAt) {
-    // Off the route, show where you actually are — not where you'd be if you
-    // were still on it. Seeing the gap is the whole point of the warning.
-    const raw = nav.offRoute ? nav.position : (nav.snapped ?? nav.position)
-    const heading = device ?? nav.heading
-    return raw
-      ? { position: raw, index: currentIndex(), bearing: heading, cameraBearing: heading }
-      : null
-  }
-
-  const { maxSeconds, damping, maxKm } = reckoning()
-  const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, maxSeconds)
-  const ahead =
-    nav.stationary || nav.paceKmh < MOVING_KMH
-      ? 0 // standing still: the arrow stays put
-      : Math.min((nav.paceKmh / 3600) * elapsed * damping, maxKm)
-  const km = nav.alongKm + ahead
-  const { position, index } = positionAtKm(prepared, km)
-  return {
-    position,
-    index,
-    // The arrow shows the road you are on, measured from where you stand.
-    bearing: device ?? segmentBearingAt(prepared, index, position),
-    // The camera aims further ahead so it turns smoothly instead of snapping.
-    cameraBearing: device ?? bearingAlong(prepared, km),
-  }
-}
-
-function followTick() {
-  followFrame = requestAnimationFrame(followTick)
-  if (!nav.active) return
-
-  const projected = projectedNow()
-  if (!projected) return
-
-  if (!shown.valid) {
-    shown.lng = projected.position[0]
-    shown.lat = projected.position[1]
-    shown.valid = true
-  }
-  const positionEase = reckoning().positionEase
-  shown.lng += (projected.position[0] - shown.lng) * positionEase
-  shown.lat += (projected.position[1] - shown.lat) * positionEase
-  const here: LngLat = [shown.lng, shown.lat]
-
-  ensurePuck(here, projected.bearing)
-  if (nav.offRoute) drawRejoin()
-  // The grey trail ends where the arrow is, not where the last fix was.
-  paintTraveled({ position: here, index: projected.index })
-
-  if (!followCamera || touchesDown) return
-
-  if (!cam.valid) {
-    cam.lng = here[0]
-    cam.lat = here[1]
-    cam.bearing = projected.cameraBearing ?? map.getBearing()
-    cam.valid = true
-  }
-  if (projected.cameraBearing != null) {
-    const ease = deviceHeading() == null ? BEARING_EASE : COMPASS_BEARING_EASE
-    cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * ease
-  }
-  cam.lng += (here[0] - cam.lng) * CENTER_EASE
-  cam.lat += (here[1] - cam.lat) * CENTER_EASE
-
-  // Track the same eased point the arrow uses (with a whisker of lag), so it
-  // holds still on screen and the world moves under it.
-  const move: maplibregl.JumpToOptions = {
-    center: [cam.lng, cam.lat],
-    bearing: cam.bearing,
-  }
-
-  if (framing) {
-    const zoom = map.getZoom() + (framing.zoom - map.getZoom()) * FRAMING_EASE
-    const pitch = map.getPitch() + (framing.pitch - map.getPitch()) * FRAMING_EASE
-    const pad = map.getPadding()
-    const padTop = pad.top ?? 0
-    const padBottom = pad.bottom ?? 0
-    const padding = {
-      top: padTop + (framing.padding.top - padTop) * FRAMING_EASE,
-      bottom: padBottom + (framing.padding.bottom - padBottom) * FRAMING_EASE,
-      left: 0,
-      right: 0,
-    }
-    move.zoom = zoom
-    move.pitch = pitch
-    move.padding = padding
-    if (
-      Math.abs(framing.zoom - zoom) < 0.02 &&
-      Math.abs(framing.pitch - pitch) < 0.5 &&
-      Math.abs(framing.padding.top - padding.top) < 2
-    ) {
-      framing = null // settled — zoom is yours again
-    }
-  }
-
-  map.jumpTo(move)
-}
-
-function startFollowing(snapToTarget = false) {
-  if (snapToTarget) cam.valid = false
-  if (!followFrame) followFrame = requestAnimationFrame(followTick)
-}
-
-function stopFollowing() {
-  cancelAnimationFrame(followFrame)
-  followFrame = 0
-  cam.valid = false
-  shown.valid = false
-  framing = null
-  puckAngle = null
-}
-
-// Keep the arrow low after a rotate or a keyboard resize.
-function refreshNavPadding() {
-  if (!nav.active) return
-  if (framing) framing.padding = navPadding()
-  else map.setPadding(navPadding())
+  drawFrame = requestAnimationFrame(step)
 }
 
 /**
@@ -526,26 +110,25 @@ function refreshNavPadding() {
  * the part already covered rather than drawing a line from them to it — a
  * straight bridge would cut across gardens and canals and suggest a way
  * through that isn't there.
+ *
+ * `rejoinTrimmed` only ever grows, and resets when a fresh path arrives: a
+ * nearest-point search over the whole path could match a later stretch that
+ * happens to pass close by, and lop off everything before it — which is how
+ * the line came up short.
  */
-// How far along the way back we have already trimmed. Only ever grows, and
-// resets when a fresh path arrives: a nearest-point search over the whole
-// path could match a later stretch that happens to pass close by, and lop
-// off everything before it — which is how the line came up short.
 let rejoinTrimmed = 0
 const ON_REJOIN_M = 25 // beyond this you are not on the path, you are near it
 
 function drawRejoin() {
-  const source = map.getSource('rejoin') as maplibregl.GeoJSONSource | undefined
-  if (!source) return
   if (!nav.rejoin || !nav.offRoute) {
-    source.setData(EMPTY)
+    layers.setRejoin(null)
     return
   }
 
   const path = nav.rejoin.coordinates
   const from = nav.position
   if (!from || path.length < 2) {
-    source.setData(routeFeature(path))
+    layers.setRejoin(path)
     return
   }
 
@@ -564,7 +147,7 @@ function drawRejoin() {
   if (best * 1000 <= ON_REJOIN_M) {
     rejoinTrimmed = Math.min(nearest, path.length - 2)
   }
-  source.setData(routeFeature(path.slice(rejoinTrimmed)))
+  layers.setRejoin(path.slice(rejoinTrimmed))
 }
 
 let traveledPaintedAt = 0
@@ -573,10 +156,9 @@ let traveledPaintedAt = 0
  * Grey out the route behind the rider. Follows the interpolated position so
  * the boundary sits under the arrow rather than trailing a fix behind it.
  */
-function paintTraveled(projected: { position: LngLat; index: number | null }) {
+function paintTraveled(position: LngLat, index: number) {
   const prepared = preparedRoute()
-  const source = map.getSource('traveled') as maplibregl.GeoJSONSource | undefined
-  if (!prepared || !source) return
+  if (!prepared) return
 
   // A few times a second is plenty and keeps long routes cheap.
   const now = performance.now()
@@ -585,82 +167,64 @@ function paintTraveled(projected: { position: LngLat; index: number | null }) {
 
   // Off the route the rider is somewhere else entirely; the trail still marks
   // how far along the route they got, so it ends at the projection.
-  const tip = nav.offRoute ? nav.snapped : projected.position
+  const tip = nav.offRoute ? nav.snapped : position
   if (!tip) return
-  const index = nav.offRoute ? currentIndex() : (projected.index ?? currentIndex())
-  source.setData(routeFeature(traveledLine(prepared, index ?? currentIndex(), tip)))
+  const at = nav.offRoute ? currentIndex() : (index ?? currentIndex())
+  layers.setTraveled(traveledLine(prepared, at, tip))
 }
 
-/**
- * Shift the camera centre downwards so the arrow sits near the bottom of the
- * screen and the road ahead gets the space instead.
- */
-function navPadding() {
-  const height = container.value?.clientHeight ?? window.innerHeight
-  const dash = 150
-  return { top: Math.round(height * 0.4) + dash, bottom: dash, left: 0, right: 0 }
+/** Everything the camera loop should draw at the eased position. */
+function onFollowFrame(here: LngLat, projected: Projection) {
+  puck.update(here, projected.bearing)
+  if (nav.offRoute) drawRejoin()
+  // The grey trail ends where the arrow is, not where the last fix was.
+  paintTraveled(here, projected.index)
 }
 
 function enterNavigation() {
-  setCarPoisHidden(true)
-  followCamera = true
-  map.setLayoutProperty('traveled-line', 'visibility', 'visible')
-  marker?.remove()
-  marker = null
-  for (const m of wpMarkers) m.remove()
-  wpMarkers = []
+  styleTweaks.setCarPoisHidden(true)
+  layers.showTraveled(true)
+  markers.removeStart()
+  markers.clearWaypoints()
 
   // Start the camera from wherever the planner left it and let the loop glide
   // in — zoom, tilt, padding and centre all travelling together.
-  // Start the shown position at the planner's centre so the loop glides in
-  // from there, rather than cutting straight to the rider.
-  const centre = map.getCenter()
-  shown.lng = centre.lng
-  shown.lat = centre.lat
-  shown.valid = true
-  cam.lng = centre.lng
-  cam.lat = centre.lat
-  cam.bearing = map.getBearing()
-  cam.valid = true
-
-  framing = {
-    zoom: NAV_ZOOM[store.mode] ?? 18,
-    pitch: 55,
-    padding: navPadding(),
-  }
-  startFollowing()
+  camera.seedFromView()
+  camera.setFraming({ zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() })
+  camera.start()
 }
 
 function exitNavigation() {
-  setCarPoisHidden(false)
-  stopFollowing()
-  puck?.remove()
-  puck = null
-  ;(map.getSource('rejoin') as maplibregl.GeoJSONSource | undefined)?.setData(EMPTY)
-  ;(map.getSource('traveled') as maplibregl.GeoJSONSource | undefined)?.setData(EMPTY)
-  map.setLayoutProperty('traveled-line', 'visibility', 'none')
-  if (store.start) ensureMarker(store.start.lngLat)
+  styleTweaks.setCarPoisHidden(false)
+  camera.stop()
+  puck.remove()
+  layers.clearNavigationLines()
+  layers.showTraveled(false)
+  if (store.start) markers.setStart(store.start.lngLat, setStart)
   renderWaypoints()
 
   // Flatten back to 2D as part of the same camera move: a separate easeTo
   // would be cancelled by fitBounds, leaving the map still pitched.
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
   if (store.route) {
-    const coords = store.route.geometry.coordinates
-    const bounds = coords.reduce(
-      (b, c) => b.extend(ll(c)),
-      new maplibregl.LngLatBounds(ll(coords[0]), ll(coords[0])),
-    )
-    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
-    map.fitBounds(bounds, {
+    map.fitBounds(layers.boundsOf(store.route.geometry.coordinates), {
       padding: fitPadding(),
       pitch: 0,
       bearing: 0,
       duration: 1100,
     })
   } else {
-    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 })
     map.easeTo({ pitch: 0, bearing: 0, duration: 900 })
   }
+}
+
+function renderWaypoints() {
+  if (nav.active) return markers.clearWaypoints()
+  markers.renderWaypoints(store.waypoints, {
+    label: (i) => `${t('wpRemove')} ${i + 1}`,
+    onMove: moveWaypoint,
+    onRemove: removeWaypoint,
+  })
 }
 
 onMounted(() => {
@@ -674,67 +238,29 @@ onMounted(() => {
   })
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
 
+  styleTweaks = createStyleTweaks(map)
+  layers = createRouteLayers(map)
+  markers = createMarkers(map)
+  puck = createPuck(map)
+  camera = createFollowCamera(map, {
+    project: projectedPosition,
+    active: () => nav.active,
+    positionEase: () => reckoning().positionEase,
+    fromCompass: () => deviceHeading() != null,
+    onFrame: onFollowFrame,
+  })
+
   // The container can be laid out after map init (style injection timing),
   // so track its size ourselves.
   resizeObserver = new ResizeObserver(() => {
     map.resize()
-    refreshNavPadding()
+    if (nav.active) camera.refreshPadding(navPadding())
   })
   resizeObserver.observe(container.value!)
 
   map.on('load', () => {
-    removeExtrusions()
-    map.addSource('route', { type: 'geojson', data: EMPTY, lineMetrics: true })
-    map.addLayer({
-      id: 'route-casing',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ffffff',
-        'line-width': groundWidth(CASING_WIDTH_M, routeLat(), 8),
-        'line-opacity': 0.9,
-      },
-    })
-    map.addLayer({
-      id: 'route-line',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        // Wider at navigation zooms, where the line is the thing you follow.
-        'line-width': groundWidth(PATH_WIDTH_M, routeLat(), 5),
-        'line-gradient': lineGradient(store.mode),
-      },
-    })
-
-    // Path back to the loop after a wrong turn.
-    map.addSource('rejoin', { type: 'geojson', data: EMPTY })
-    map.addLayer({
-      id: 'rejoin-line',
-      type: 'line',
-      source: 'rejoin',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#f59e0b',
-        'line-width': groundWidth(PATH_WIDTH_M, routeLat(), 4),
-        'line-dasharray': [1.6, 1.2],
-      },
-    })
-
-    // Drawn over the route while navigating, greying out what's behind you.
-    map.addSource('traveled', { type: 'geojson', data: EMPTY })
-    map.addLayer({
-      id: 'traveled-line',
-      type: 'line',
-      source: 'traveled',
-      layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'none' },
-      paint: {
-        'line-color': '#94a3b8',
-        'line-width': groundWidth(PATH_WIDTH_M, routeLat(), 5),
-        'line-opacity': 0.85,
-      },
-    })
+    styleTweaks.removeExtrusions()
+    layers.add(store.mode, routeLat())
 
     // A restored session is already in the store before the style finishes
     // loading, so paint it here rather than waiting for a change event.
@@ -746,32 +272,28 @@ onMounted(() => {
   // user; the Recenter button is the only way back. Note the follow loop's
   // own jumpTo also fires rotate/pitch events — only real gestures carry an
   // originalEvent.
-  const releaseCamera = () => {
-    followCamera = false
-    framing = null
-  }
   map.on('dragstart', () => {
-    if (nav.active) releaseCamera()
+    if (nav.active) camera.release()
   })
   map.on('rotatestart', (e) => {
-    if (nav.active && e.originalEvent) releaseCamera()
+    if (nav.active && e.originalEvent) camera.release()
   })
   map.on('pitchstart', (e) => {
-    if (nav.active && e.originalEvent) releaseCamera()
+    if (nav.active && e.originalEvent) camera.release()
   })
 
   // A pinch means you want a different zoom than the one we chose, but you
   // are still following.
   map.on('zoomstart', (e) => {
-    if (nav.active && e.originalEvent) framing = null
+    if (nav.active && e.originalEvent) camera.setFraming(null)
   })
 
-  // See touchesDown above: freeze camera writes while fingers are down so
-  // MapLibre's touch handlers get to recognise the gesture at all.
+  // Freeze camera writes while fingers are down so MapLibre's touch handlers
+  // get to recognise the gesture at all — see follow.ts.
   const canvas = map.getCanvasContainer()
-  canvas.addEventListener('touchstart', () => (touchesDown = true), { passive: true })
+  canvas.addEventListener('touchstart', () => camera.holdForTouch(true), { passive: true })
   const touchDone = (e: TouchEvent) => {
-    if (e.touches.length === 0) touchesDown = false
+    if (e.touches.length === 0) camera.holdForTouch(false)
   }
   canvas.addEventListener('touchend', touchDone, { passive: true })
   canvas.addEventListener('touchcancel', touchDone, { passive: true })
@@ -788,7 +310,7 @@ onMounted(() => {
   watch(
     () => store.start,
     (start) => {
-      if (start) ensureMarker(start.lngLat)
+      if (start) markers.setStart(start.lngLat, setStart)
     },
     { immediate: true },
   )
@@ -796,12 +318,11 @@ onMounted(() => {
   // Locale too: the pins carry their own "tap to remove" label.
   watch([() => store.waypoints, locale], renderWaypoints, { immediate: true })
 
-
   watch(
     () => store.route,
     (route) => {
-      if (!map.getSource('route')) return
-      route ? drawRoute(route) : clearRoute()
+      if (!layers.ready()) return
+      route ? drawRoute(route) : (cancelAnimationFrame(drawFrame), layers.clearRoute())
     },
   )
 
@@ -827,14 +348,13 @@ onMounted(() => {
     (inset, oldInset) => {
       if (nav.active) return
       if (store.route) {
-        const coords = store.route.geometry.coordinates
-        const bounds = coords.reduce(
-          (b, c) => b.extend(ll(c)),
-          new maplibregl.LngLatBounds(ll(coords[0]), ll(coords[0])),
-        )
         // pitch 0: right after exiting navigation this refit cancels the
         // exit's own flattening animation, so flatten here as well.
-        map.fitBounds(bounds, { padding: fitPadding(), pitch: 0, duration: 500 })
+        map.fitBounds(layers.boundsOf(store.route.geometry.coordinates), {
+          padding: fitPadding(),
+          pitch: 0,
+          duration: 500,
+        })
       } else {
         map.panBy([0, (inset - (oldInset ?? 0)) / 2], { duration: 350 })
       }
@@ -843,11 +363,7 @@ onMounted(() => {
 
   watch(
     () => store.mode,
-    (mode) => {
-      if (map.getLayer('route-line')) {
-        map.setPaintProperty('route-line', 'line-gradient', lineGradient(mode))
-      }
-    },
+    (mode) => layers.setGradient(mode),
   )
 
   watch(
@@ -861,11 +377,10 @@ onMounted(() => {
   watch(
     () => nav.active,
     (active) => {
-      if (!map.getSource('traveled')) return
+      if (!layers.ready()) return
       active ? enterNavigation() : exitNavigation()
     },
   )
-
 })
 
 if (import.meta.env.DEV) {
@@ -876,8 +391,9 @@ if (import.meta.env.DEV) {
 }
 
 onBeforeUnmount(() => {
-  stopFollowing()
-  cancelAnimationFrame(animationFrame)
+  camera?.stop()
+  puck?.remove()
+  cancelAnimationFrame(drawFrame)
   resizeObserver?.disconnect()
   map?.remove()
 })

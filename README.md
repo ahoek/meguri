@@ -75,8 +75,16 @@ The code is layered with the dependency rule pointing inward:
 - `src/infra` — adapters for the outside world: the BRouter client, Nominatim,
   speech synthesis, GPX download.
 - `src/app` — orchestration: the planner store, the navigation session, and
-  the guidance policy (what to announce, when, in which words).
-- `src/components` — the Vue UI on top.
+  the guidance policy (what to announce, when, in which words). Position
+  policy lives here too: where we believe you are between fixes, and how much
+  to trust dead reckoning, are decisions rather than drawing.
+- `src/map` — MapLibre adapters, one per concern: the basemap tweaks, the
+  route layers, the markers, the arrow, and the follow camera. Each is a
+  factory closing over the map and its own state, so nothing shares a scope
+  with anything it doesn't need.
+- `src/composables` — reusable Vue state: the bottom sheet's drag and snap,
+  the debounced place search.
+- `src/components` — the Vue UI on top, wiring the above together.
 
 ## Development
 

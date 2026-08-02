@@ -5,6 +5,9 @@ import {
   locateInitial,
   nextManeuver,
   routeBearingAt,
+  positionAtKm,
+  segmentBearingAt,
+  bearingAlong,
   AT_START_M,
 } from '../domain/navigation'
 import { speakManeuver, resetSpeech } from './guidance'
@@ -445,6 +448,60 @@ export function reckoning() {
   return profileMode === 'walk'
     ? { maxSeconds: 0, damping: 0, maxKm: 0, positionEase: 0.24 }
     : { maxSeconds: 3, damping: 0.5, maxKm: 0.012, positionEase: 0.1 }
+}
+
+// Below this the arrow stays put rather than creeping along on a stale pace.
+const MOVING_KMH = 1.5
+
+export interface Projection {
+  position: LngLat
+  index: number
+  bearing: number | null
+  cameraBearing: number | null
+}
+
+/**
+ * Where we believe the rider is right now, between fixes, and which way to
+ * face them.
+ *
+ * Policy rather than drawing: the map asks this every frame and does as it is
+ * told. It lives beside `reckoning()` because the two answer halves of the
+ * same question, and splitting them across layers is what let the dead
+ * reckoning figures go stale in the component without anyone noticing.
+ */
+export function projectedPosition(): Projection | null {
+  if (!prepared) return null
+
+  // On foot this is the compass: the arrow points where you are facing, not
+  // where the road runs, so turning on the spot turns the map with you.
+  const device = deviceHeading()
+
+  if (nav.offRoute || !nav.fixAt) {
+    // Off the route, show where you actually are — not where you'd be if you
+    // were still on it. Seeing the gap is the whole point of the warning.
+    const raw = nav.offRoute ? nav.position : (nav.snapped ?? nav.position)
+    const heading = device ?? nav.heading
+    return raw
+      ? { position: raw, index: lastIndex, bearing: heading, cameraBearing: heading }
+      : null
+  }
+
+  const { maxSeconds, damping, maxKm } = reckoning()
+  const elapsed = Math.min((performance.now() - nav.fixAt) / 1000, maxSeconds)
+  const ahead =
+    nav.stationary || nav.paceKmh < MOVING_KMH
+      ? 0 // standing still: the arrow stays put
+      : Math.min((nav.paceKmh / 3600) * elapsed * damping, maxKm)
+  const km = nav.alongKm + ahead
+  const { position, index } = positionAtKm(prepared, km)
+  return {
+    position,
+    index,
+    // The arrow shows the road you are on, measured from where you stand.
+    bearing: device ?? segmentBearingAt(prepared, index, position),
+    // The camera aims further ahead so it turns smoothly instead of snapping.
+    cameraBearing: device ?? bearingAlong(prepared, km),
+  }
 }
 
 /** Exposed so the map can draw the traveled/remaining split. */
