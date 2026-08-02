@@ -1,49 +1,27 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { generateLoop } from '../src/domain/route'
 import { ORIGIN, offset, metresBetween } from './helpers'
-import type { LngLat } from '../src/lib/geo'
-import type { VoiceHint } from '../src/lib/route'
+import type { LngLat } from '../src/domain/geo'
+import type { Route, RouteThrough, VoiceHint } from '../src/domain/route'
 
-// route.js reaches for BRouter as soon as it is asked to route; these tests
-// only exercise the shaping it does to the answer.
-async function loadRoute() {
-  vi.resetModules()
-  vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-  return import('../src/lib/route')
-}
-
-function brouterResponse(coordinates: LngLat[], voicehints: VoiceHint[] = []) {
+// The domain takes the router as a plain function, so tests hand it stubs —
+// no network, no fetch mocking.
+function routeOf(coordinates: LngLat[], lengthM = 1000, voicehints: VoiceHint[] = []): Route {
   return {
-    features: [
-      {
-        geometry: { type: 'LineString', coordinates },
-        properties: {
-          'track-length': '1000',
-          'total-time': '300',
-          voicehints,
-        },
-      },
-    ],
+    geometry: { type: 'LineString', coordinates },
+    distanceKm: lengthM / 1000,
+    durationSec: 300,
+    voicehints,
   }
 }
 
-/** Drive one generateLoop attempt and capture what it produced. */
-async function routeThrough(coordinates: LngLat[], voicehints: VoiceHint[] = []) {
-  const mod = await loadRoute()
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      new Response(JSON.stringify(brouterResponse(coordinates, voicehints)), {
-        status: 200,
-      }),
-    ),
-  )
-  return mod.generateLoop({
+function loopWith(routeThrough: RouteThrough) {
+  return generateLoop({
     start: ORIGIN,
     targetKm: 1,
-    profile: 'bike',
-    nature: false,
     bearing: 0,
     clockwise: true,
+    routeThrough,
   })
 }
 
@@ -60,7 +38,7 @@ describe('trimming out-and-back spurs', () => {
 
   it('removes the doubled-back tip', async () => {
     const { coords, b } = withSpur()
-    const route = await routeThrough(coords)
+    const route = await loopWith(async () => routeOf(coords))
     const out = route.geometry.coordinates
 
     expect(out).toHaveLength(3)
@@ -72,10 +50,12 @@ describe('trimming out-and-back spurs', () => {
   it('re-indexes the turn instructions it keeps', async () => {
     const { coords } = withSpur()
     // A turn at point 4 (the final point) survives; one at the spur tip does not.
-    const route = await routeThrough(coords, [
-      [2, 2, 0, 0, 90], // on the tip — goes away with it
-      [4, 5, 0, 0, 90], // on the last point — kept, but now at index 2
-    ])
+    const route = await loopWith(async () =>
+      routeOf(coords, 1000, [
+        [2, 2, 0, 0, 90], // on the tip — goes away with it
+        [4, 5, 0, 0, 90], // on the last point — kept, but now at index 2
+      ]),
+    )
 
     expect(route.voicehints).toHaveLength(1)
     expect(route.voicehints[0][0]).toBe(2)
@@ -84,7 +64,7 @@ describe('trimming out-and-back spurs', () => {
 
   it('leaves a clean route untouched', async () => {
     const straight = [ORIGIN, offset(ORIGIN, 0, 100), offset(ORIGIN, 0, 200)]
-    const route = await routeThrough(straight, [[1, 2, 0, 0, 90]])
+    const route = await loopWith(async () => routeOf(straight, 1000, [[1, 2, 0, 0, 90]]))
 
     expect(route.geometry.coordinates).toHaveLength(3)
     expect(route.voicehints[0][0]).toBe(1)
@@ -96,8 +76,6 @@ describe('scoring loop candidates', () => {
   // a kilometre long-of-target must still beat an exact one that rides the
   // same road twice.
   it('prefers a clean loop over an exact one that doubles back', async () => {
-    const mod = await loadRoute()
-
     const a = ORIGIN
     const b = offset(a, 0, 200)
     // Runs the a–b road in both directions (~16% of its length doubled),
@@ -106,35 +84,10 @@ describe('scoring loop candidates', () => {
     // No doubling, but half a kilometre over target.
     const clean = [a, offset(a, 0, 300), offset(a, 300, 300), offset(a, 300, 0), a]
 
-    const response = (coordinates: LngLat[], lengthM: number) =>
-      new Response(
-        JSON.stringify({
-          features: [
-            {
-              geometry: { type: 'LineString', coordinates },
-              properties: {
-                'track-length': String(lengthM),
-                'total-time': '300',
-                voicehints: [],
-              },
-            },
-          ],
-        }),
-        { status: 200 },
-      )
-
-    const fetchMock = vi.fn(async () => response(clean, 1500))
-    fetchMock.mockImplementationOnce(async () => response(doubled, 1000))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const route = await mod.generateLoop({
-      start: a,
-      targetKm: 1,
-      profile: 'bike',
-      nature: false,
-      bearing: 0,
-      clockwise: true,
-    })
+    let call = 0
+    const route = await loopWith(async () =>
+      call++ === 0 ? routeOf(doubled, 1000) : routeOf(clean, 1500),
+    )
 
     expect(route.geometry.coordinates).toHaveLength(clean.length)
     expect(route.distanceKm).toBeCloseTo(1.5)
@@ -143,34 +96,28 @@ describe('scoring loop candidates', () => {
 
 describe('waypoints', () => {
   it('routes the loop through every user waypoint', async () => {
-    const mod = await loadRoute()
-    const urls: string[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url) => {
-        urls.push(String(url))
-        const square = [
-          ORIGIN,
-          offset(ORIGIN, 0, 300),
-          offset(ORIGIN, 300, 300),
-          offset(ORIGIN, 300, 0),
-          ORIGIN,
-        ]
-        return new Response(JSON.stringify(brouterResponse(square)), { status: 200 })
-      }),
-    )
-
     const wp = offset(ORIGIN, 500, 500)
-    await mod.generateLoop({
+    const requested: LngLat[][] = []
+    const clean = [
+      ORIGIN,
+      offset(ORIGIN, 0, 300),
+      offset(ORIGIN, 300, 300),
+      offset(ORIGIN, 300, 0),
+      ORIGIN,
+    ]
+
+    await generateLoop({
       start: ORIGIN,
       targetKm: 1,
-      profile: 'bike',
-      nature: false,
       bearing: 0,
       clockwise: true,
       waypoints: [wp],
+      routeThrough: async (points) => {
+        requested.push(points)
+        return routeOf(clean)
+      },
     })
 
-    expect(urls[0]).toContain(`${wp[0].toFixed(6)},${wp[1].toFixed(6)}`)
+    expect(requested[0]).toContainEqual(wp)
   })
 })

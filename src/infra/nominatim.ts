@@ -1,4 +1,4 @@
-import type { LngLat } from './geo'
+import type { LngLat } from '../domain/geo'
 
 const BASE = 'https://nominatim.openstreetmap.org'
 

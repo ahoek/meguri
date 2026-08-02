@@ -11,14 +11,14 @@ import {
   generate,
   showError,
   clearWaypoints,
-} from '../store'
-import { searchPlaces } from '../lib/geocode'
-import { downloadGpx } from '../lib/gpx'
-import { startNavigation } from '../lib/nav-session'
-import { primeSpeech } from '../lib/speech'
+} from '../app/store'
+import { searchPlaces } from '../infra/nominatim'
+import { downloadGpx } from '../infra/gpx'
+import { startNavigation } from '../app/nav-session'
+import { primeSpeech } from '../app/guidance'
 import { LOCALES, locale, setLocale, t } from '../i18n'
-import type { PlaceResult } from '../lib/geocode'
-import { localNumber } from '../lib/format'
+import type { PlaceResult } from '../infra/nominatim'
+import { localNumber } from '../domain/format'
 
 const query = ref('')
 const results = ref<PlaceResult[]>([])
@@ -489,7 +489,7 @@ const routeStats = computed(() => {
             </svg>
             {{ t('surpriseMe') }}
           </button>
-          <button class="ghost-btn" @click="downloadGpx(store.route!, store.mode)">
+          <button class="ghost-btn" @click="downloadGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk'))">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>

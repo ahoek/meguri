@@ -7,7 +7,7 @@ import {
   locateInitial,
   locateOnRoute,
   nextManeuver,
-} from '../src/lib/navigation'
+} from '../src/domain/navigation'
 import { ORIGIN, offset, metresBetween, routeFrom, squareLoop } from './helpers'
 
 const northThenEast = () =>

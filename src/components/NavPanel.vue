@@ -1,14 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { nav, stopNavigation, setVoice } from '../lib/nav-session'
-import {
-  primeSpeech,
-  availableVoices,
-  voiceChoice,
-  setChosenVoice,
-} from '../lib/speech'
+import { nav, stopNavigation, setVoice } from '../app/nav-session'
+import { primeSpeech, chooseVoice } from '../app/guidance'
+import { allVoices, voiceChoice } from '../infra/speech'
 import { locale, t } from '../i18n'
-import { localNumber } from '../lib/format'
+import { localNumber } from '../domain/format'
 
 const emit = defineEmits(['recenter'])
 
@@ -92,6 +88,9 @@ function onVoiceToggle() {
 // Long-pressing the voice button opens the voice picker; a short tap keeps
 // toggling. The release of a long press still fires a click, so it is eaten.
 const voiceMenuOpen = ref(false)
+const availableVoices = computed(() =>
+  allVoices.value.filter((v) => v.lang?.toLowerCase().startsWith(locale.value)),
+)
 const chosenVoiceURI = computed(() => voiceChoice.value[locale.value] ?? '')
 let pressTimer: ReturnType<typeof setTimeout> | undefined
 let longPressed = false
@@ -115,8 +114,8 @@ function onVoiceClick() {
   onVoiceToggle()
 }
 
-function chooseVoice(uri: string) {
-  setChosenVoice(uri) // speaks a sample, so no guessing which voice this is
+function pickVoice(uri: string) {
+  chooseVoice(uri) // speaks a sample, so no guessing which voice this is
   voiceMenuOpen.value = false
 }
 
@@ -182,7 +181,7 @@ const progress = computed(() => {
           role="menuitemradio"
           :aria-checked="chosenVoiceURI === ''"
           :class="{ active: chosenVoiceURI === '' }"
-          @click="chooseVoice('')"
+          @click="pickVoice('')"
         >
           {{ t('voiceAuto') }}
         </button>
@@ -192,7 +191,7 @@ const progress = computed(() => {
           role="menuitemradio"
           :aria-checked="chosenVoiceURI === v.voiceURI"
           :class="{ active: chosenVoiceURI === v.voiceURI }"
-          @click="chooseVoice(v.voiceURI)"
+          @click="pickVoice(v.voiceURI)"
         >
           {{ v.name }}
         </button>

@@ -1,6 +1,6 @@
-import { prepareRoute } from '../src/lib/navigation'
-import type { LngLat } from '../src/lib/geo'
-import type { Route, VoiceHint } from '../src/lib/route'
+import { prepareRoute } from '../src/domain/navigation'
+import type { LngLat } from '../src/domain/geo'
+import type { Route, VoiceHint } from '../src/domain/route'
 
 // Around 52°N a degree of longitude is ~68 km and of latitude ~111 km.
 export const M_PER_DEG_LNG = 68000

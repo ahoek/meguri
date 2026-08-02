@@ -5,13 +5,13 @@ import {
   locateInitial,
   nextManeuver,
   routeBearingAt,
-} from './navigation'
-import { speakManeuver, resetSpeech } from './speech'
-import { routeBetween } from './route'
-import { distanceKm } from './geo'
-import type { LngLat } from './geo'
-import type { Route, Profile } from './route'
-import type { Maneuver, PreparedRoute } from './navigation'
+} from '../domain/navigation'
+import { speakManeuver, resetSpeech } from './guidance'
+import { routeBetween } from '../infra/brouter'
+import { distanceKm } from '../domain/geo'
+import type { LngLat } from '../domain/geo'
+import type { Route, Profile } from '../domain/route'
+import type { Maneuver, PreparedRoute } from '../domain/navigation'
 
 interface NavState {
   active: boolean

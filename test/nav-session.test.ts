@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { positionAtKm, prepareRoute } from '../src/lib/navigation'
+import { positionAtKm, prepareRoute } from '../src/domain/navigation'
 import { squareLoop, ORIGIN, offset } from './helpers'
-import type { LngLat } from '../src/lib/geo'
-import type { PreparedRoute } from '../src/lib/navigation'
+import type { LngLat } from '../src/domain/geo'
+import type { PreparedRoute } from '../src/domain/navigation'
 
-type NavModule = typeof import('../src/lib/nav-session')
+type NavModule = typeof import('../src/app/nav-session')
 type FixCallback = (pos: {
   timestamp: number
   coords: {
@@ -64,7 +64,7 @@ beforeEach(async () => {
   // tests are about the tracking decisions, not the network.
   vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
   vi.resetModules()
-  const mod = await import('../src/lib/nav-session')
+  const mod = await import('../src/app/nav-session')
   nav = mod.nav
   startNavigation = mod.startNavigation
   stopNavigation = mod.stopNavigation

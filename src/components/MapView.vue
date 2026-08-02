@@ -7,18 +7,18 @@ import {
   addWaypoint,
   moveWaypoint,
   removeWaypoint,
-} from '../store'
-import { distanceKm } from '../lib/geo'
-import { nav, preparedRoute, currentIndex } from '../lib/nav-session'
+} from '../app/store'
+import { distanceKm } from '../domain/geo'
+import { nav, preparedRoute, currentIndex } from '../app/nav-session'
 import {
   traveledLine,
   positionAtKm,
   bearingAlong,
   segmentBearingAt,
-} from '../lib/navigation'
+} from '../domain/navigation'
 import { t } from '../i18n'
-import type { LngLat } from '../lib/geo'
-import type { Route, Profile } from '../lib/route'
+import type { LngLat } from '../domain/geo'
+import type { Route, Profile } from '../domain/route'
 
 const container = ref<HTMLElement | null>(null)
 let map: maplibregl.Map

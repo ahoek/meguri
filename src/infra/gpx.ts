@@ -1,7 +1,7 @@
-import { t } from '../i18n'
-import type { Route, Profile } from './route'
+import type { Route } from '../domain/route'
 
-export function downloadGpx(route: Route, mode: Profile) {
+/** `kind` is the translated activity name for the track title. */
+export function downloadGpx(route: Route, kind: string) {
   const points = route.geometry.coordinates
     .map(([lng, lat, ele]) => {
       const pos = `lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}"`
@@ -10,7 +10,6 @@ export function downloadGpx(route: Route, mode: Profile) {
         : `      <trkpt ${pos}/>`
     })
     .join('\n')
-  const kind = t(mode === 'bike' ? 'gpxRide' : 'gpxWalk')
   const name = `Meguri ${kind} — ${route.distanceKm.toFixed(1)} km`
   const gpx = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="Meguri" xmlns="http://www.topografix.com/GPX/1/1">

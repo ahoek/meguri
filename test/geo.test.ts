@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loopViaWithWaypoints, bearingBetween } from '../src/lib/geo'
+import { loopViaWithWaypoints, bearingBetween } from '../src/domain/geo'
 import { ORIGIN, offset } from './helpers'
 
 describe('loopViaWithWaypoints', () => {

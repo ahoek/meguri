@@ -1,11 +1,12 @@
 import { reactive, watch } from 'vue'
-import { generateLoop } from './lib/route'
-import { distanceKm } from './lib/geo'
-import { reverseGeocode } from './lib/geocode'
-import { locale } from './i18n'
-import { nav, startNavigation } from './lib/nav-session'
-import type { LngLat } from './lib/geo'
-import type { Route, Profile } from './lib/route'
+import { generateLoop } from '../domain/route'
+import { distanceKm } from '../domain/geo'
+import { fetchRoute } from '../infra/brouter'
+import { reverseGeocode } from '../infra/nominatim'
+import { locale } from '../i18n'
+import { nav, startNavigation } from './nav-session'
+import type { LngLat } from '../domain/geo'
+import type { Route, Profile } from '../domain/route'
 
 export type TargetType = 'distance' | 'time'
 
@@ -337,15 +338,15 @@ export async function generate({ shuffle = false } = {}) {
   store.busy = true
   store.error = ''
   try {
+    const { mode, nature } = store
+    const signal = abortController.signal
     store.route = await generateLoop({
       start: store.start.lngLat,
       targetKm: targetKm(),
-      profile: store.mode,
-      nature: store.nature,
       bearing: store.bearing,
       clockwise: store.clockwise,
       waypoints: store.waypoints,
-      signal: abortController.signal,
+      routeThrough: (points) => fetchRoute(points, mode, nature, signal),
     })
   } catch (err) {
     if ((err as Error).name !== 'AbortError') {

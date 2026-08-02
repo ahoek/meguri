@@ -3,8 +3,8 @@ import { onMounted, ref, watchEffect } from 'vue'
 import MapView from './components/MapView.vue'
 import ControlPanel from './components/ControlPanel.vue'
 import NavPanel from './components/NavPanel.vue'
-import { store, resumeSession } from './store'
-import { nav } from './lib/nav-session'
+import { store, resumeSession } from './app/store'
+import { nav } from './app/nav-session'
 import { locale, t } from './i18n'
 
 const mapView = ref<InstanceType<typeof MapView> | null>(null)

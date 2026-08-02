@@ -65,6 +65,17 @@ through it, self-host BRouter and Nominatim, or move to a commercial plan.
 Vue 3 with TypeScript, Vite, MapLibre GL JS, `vite-plugin-pwa`, and a small
 hand-rolled i18n layer in `src/i18n.ts`. No UI framework, no state library.
 
+The code is layered with the dependency rule pointing inward:
+
+- `src/domain` — pure logic: geodesy, loop generation (the router is injected
+  as a function), route-following mathematics. No Vue, no i18n, no network,
+  no browser APIs — everything here is trivially testable.
+- `src/infra` — adapters for the outside world: the BRouter client, Nominatim,
+  speech synthesis, GPX download.
+- `src/app` — orchestration: the planner store, the navigation session, and
+  the guidance policy (what to announce, when, in which words).
+- `src/components` — the Vue UI on top.
+
 ## Development
 
 ```sh
