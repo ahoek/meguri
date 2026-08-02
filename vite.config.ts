@@ -8,6 +8,13 @@ const base = process.env.BASE_PATH || '/'
 
 export default defineConfig({
   base,
+  define: {
+    // Shown at the foot of the planner, so an installed PWA can be checked
+    // against the latest deploy at a glance.
+    __BUILD__: JSON.stringify(
+      new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+    ),
+  },
   test: {
     environment: 'happy-dom',
     include: ['test/**/*.test.ts'],

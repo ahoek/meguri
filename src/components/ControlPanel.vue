@@ -234,6 +234,9 @@ const wpHint = computed(() => {
 })
 
 
+// So an installed PWA can be checked against the latest deploy.
+const build = __BUILD__
+
 const routeStats = computed(() => {
   if (!store.route) return null
   return {
@@ -509,6 +512,8 @@ const routeStats = computed(() => {
         </div>
       </div>
     </Transition>
+
+    <p class="build-stamp">{{ build }}</p>
     </div>
   </section>
 </template>
@@ -1285,6 +1290,15 @@ const routeStats = computed(() => {
 .ghost-btn svg {
   width: 16px;
   height: 16px;
+}
+
+.build-stamp {
+  margin: -6px 0 0;
+  font-size: 10.5px;
+  text-align: center;
+  color: var(--ink-3);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 .rise-enter-active {
