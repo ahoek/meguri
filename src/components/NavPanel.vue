@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { store } from '../app/store'
 import { nav, stopNavigation, setVoice } from '../app/nav-session'
 import { primeSpeech, chooseVoice } from '../app/guidance'
 import { allVoices, voiceChoice } from '../infra/speech'
@@ -119,6 +120,29 @@ function pickVoice(uri: string) {
   voiceMenuOpen.value = false
 }
 
+// The banner spans the width of a phone, so it sits squarely on top of the
+// map's zoom buttons. Tell the map how far down it reaches — the height moves
+// with the wording, so measure rather than guess.
+const bannerEl = ref<HTMLElement | null>(null)
+let bannerObserver: ResizeObserver | null = null
+
+function publishBannerInset() {
+  const el = bannerEl.value
+  if (!el) return
+  store.bannerInset = Math.round(el.getBoundingClientRect().bottom)
+}
+
+onMounted(() => {
+  publishBannerInset()
+  bannerObserver = new ResizeObserver(publishBannerInset)
+  if (bannerEl.value) bannerObserver.observe(bannerEl.value)
+})
+
+onBeforeUnmount(() => {
+  bannerObserver?.disconnect()
+  store.bannerInset = 0
+})
+
 const progress = computed(() => {
   const total = nav.alongKm + nav.remainingKm
   return total ? Math.min(100, (nav.alongKm / total) * 100) : 0
@@ -130,7 +154,7 @@ const progress = computed(() => {
     <!-- Instruction banner -->
     <!-- Only colour it as a warning when it is actually warning about
          something; re-acquiring GPS shouldn't come up red. -->
-    <div class="banner" :class="{ warn: nav.ready && nav.offRoute }">
+    <div ref="bannerEl" class="banner" :class="{ warn: nav.ready && nav.offRoute }">
       <!-- No usable fix — from the very first second, or after the phone has
            been away long enough that what's on screen is history. Admitting
            that outranks every other banner: a stale one states things that
@@ -266,6 +290,13 @@ const progress = computed(() => {
   flex-direction: column;
   justify-content: space-between;
   align-items: stretch;
+  /* None of this is text to copy, and iOS answers a long press on it — the
+     one gesture the voice button needs — by selecting the words underneath
+     and raising its own callout. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .nav > *,
@@ -483,6 +514,9 @@ const progress = computed(() => {
 }
 
 .round-btn {
+  /* The long press that opens the voice picker must read as a press, not as
+     a drag on the map underneath or the start of a selection. */
+  touch-action: manipulation;
   width: 50px;
   height: 50px;
   border-radius: 50%;

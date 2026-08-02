@@ -812,6 +812,7 @@ onBeforeUnmount(() => {
     ref="container"
     class="map"
     :class="{ dropping: store.waypointMode }"
+    :style="{ '--banner-inset': store.bannerInset + 'px' }"
     :aria-label="store.waypointMode ? t('wpArmed') : t('mapAria')"
   ></div>
 </template>
@@ -825,5 +826,12 @@ onBeforeUnmount(() => {
 /* Armed to drop stops: say so under the pointer as well as in the prompt. */
 .map.dropping :deep(.maplibregl-canvas) {
   cursor: copy;
+}
+
+/* While navigating, the instruction banner covers the top of the screen.
+   Drop the zoom buttons below whatever height it has taken. */
+.map :deep(.maplibregl-ctrl-top-right) {
+  transition: transform 0.3s;
+  transform: translateY(var(--banner-inset, 0px));
 }
 </style>
