@@ -18,7 +18,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: { maplibre: ['maplibre-gl'] },
+        // Rolldown (Vite 8) only takes the function form.
+        manualChunks: (id) => (id.includes('maplibre-gl') ? 'maplibre' : undefined),
       },
     },
   },
