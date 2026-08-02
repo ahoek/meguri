@@ -41,6 +41,13 @@ const ll = ([lng, lat]: LngLat): [number, number] => [lng, lat]
 
 defineExpose({
   recenter() {
+    // Glide back from wherever the user panned to: seed the eased camera
+    // with the current view and let the follow loop close the gap.
+    const centre = map.getCenter()
+    cam.lng = centre.lng
+    cam.lat = centre.lat
+    cam.bearing = map.getBearing()
+    cam.valid = true
     followCamera = true
     framing = { zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() }
     startFollowing()
@@ -277,6 +284,10 @@ const POSITION_EASE = 0.1 // how fast the shown position converges on the truth
 // Turning is eased far more slowly than panning: the map swinging round at
 // the same rate it slides felt abrupt at corners.
 const BEARING_EASE = 0.035
+// The camera centre trails the shown position through this ease. While
+// riding the lag is under a metre, but after Recenter (or lifting a pinch)
+// it turns the snap back into a glide.
+const CENTER_EASE = 0.1
 const FRAMING_EASE = 0.05 // zoom, pitch and padding settling in or out
 // Carrying the position forward between fixes keeps motion continuous, but
 // every metre guessed is a metre that may have to be taken back when the next
@@ -373,17 +384,21 @@ function followTick() {
   if (!followCamera || touchesDown) return
 
   if (!cam.valid) {
+    cam.lng = here[0]
+    cam.lat = here[1]
     cam.bearing = projected.cameraBearing ?? map.getBearing()
     cam.valid = true
   }
   if (projected.cameraBearing != null) {
     cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * BEARING_EASE
   }
+  cam.lng += (here[0] - cam.lng) * CENTER_EASE
+  cam.lat += (here[1] - cam.lat) * CENTER_EASE
 
-  // Centre on the same eased point the arrow uses, so it holds still on
-  // screen and the world moves under it.
+  // Track the same eased point the arrow uses (with a whisker of lag), so it
+  // holds still on screen and the world moves under it.
   const move: maplibregl.JumpToOptions = {
-    center: here as [number, number],
+    center: [cam.lng, cam.lat],
     bearing: cam.bearing,
   }
 
@@ -522,6 +537,8 @@ function enterNavigation() {
   shown.lng = centre.lng
   shown.lat = centre.lat
   shown.valid = true
+  cam.lng = centre.lng
+  cam.lat = centre.lat
   cam.bearing = map.getBearing()
   cam.valid = true
 
@@ -732,7 +749,9 @@ onMounted(() => {
           (b, c) => b.extend(ll(c)),
           new maplibregl.LngLatBounds(ll(coords[0]), ll(coords[0])),
         )
-        map.fitBounds(bounds, { padding: fitPadding(), duration: 500 })
+        // pitch 0: right after exiting navigation this refit cancels the
+        // exit's own flattening animation, so flatten here as well.
+        map.fitBounds(bounds, { padding: fitPadding(), pitch: 0, duration: 500 })
       } else {
         map.panBy([0, (inset - (oldInset ?? 0)) / 2], { duration: 350 })
       }
