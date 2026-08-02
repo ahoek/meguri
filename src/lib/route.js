@@ -1,4 +1,4 @@
-import { loopViaPoints, distanceKm } from './geo.js'
+import { loopViaPoints, loopViaWithWaypoints, distanceKm } from './geo.js'
 import bikeNatureProfile from '../profiles/bike-nature.brf?raw'
 import walkNatureProfile from '../profiles/walk-nature.brf?raw'
 
@@ -161,6 +161,11 @@ function polylineKm(coords) {
  * routed length matches the target. Candidates are scored on both length
  * accuracy and street overlap, so a slightly-off loop with no backtracking
  * wins over an exact one that doubles back on itself.
+ *
+ * User `waypoints` pin the loop: it always routes through them (in angular
+ * order around their centroid), and only the generated filler points scale
+ * with the length fitting. Far-apart waypoints can demand more distance than
+ * the target asks for — the loop then simply becomes as short as they allow.
  */
 export async function generateLoop({
   start,
@@ -169,6 +174,7 @@ export async function generateLoop({
   nature = true,
   bearing,
   clockwise,
+  waypoints = [],
   signal,
 }) {
   let radius = Math.max(0.12, targetKm / (2 * Math.PI))
@@ -179,7 +185,9 @@ export async function generateLoop({
   let lastError = null
 
   for (let attempt = 0; attempt < 7; attempt++) {
-    const via = loopViaPoints(start, radius, currentBearing, clockwise, viaCount)
+    const via = waypoints.length
+      ? loopViaWithWaypoints(start, waypoints, radius, currentBearing, clockwise, viaCount)
+      : loopViaPoints(start, radius, currentBearing, clockwise, viaCount)
 
     let route
     try {
@@ -219,13 +227,29 @@ export async function generateLoop({
       bestScore = score
     }
     if (distErr < 0.06 && overlap < 0.08) break
+    // With nothing left to remove, over-target means the waypoints themselves
+    // demand the distance — a clean loop through them is as good as it gets.
+    if (
+      waypoints.length &&
+      viaCount === 0 &&
+      route.distanceKm >= targetKm &&
+      overlap < 0.08
+    ) {
+      break
+    }
+
+    const overLength = waypoints.length && route.distanceKm > targetKm * 1.1
 
     if (overlap > 0.08) {
       // Doubling back: swing towards new terrain, and pin the loop to its
       // circle with an extra via point so two legs can't collapse onto the
-      // same road between them.
+      // same road between them — unless the waypoints already make the loop
+      // too long, where extra filler only adds distance.
       currentBearing += 47
-      viaCount = Math.min(viaCount + 1, 7)
+      if (!overLength) viaCount = Math.min(viaCount + 1, 7)
+    }
+    if (overLength && viaCount > 0) {
+      viaCount -= 1 // shed filler before shrinking the circle further
     }
     const ratio = route.distanceKm / targetKm
     radius = Math.min(Math.max(radius / ratio, radius * 0.45), radius * 2.2)

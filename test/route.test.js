@@ -138,3 +138,37 @@ describe('scoring loop candidates', () => {
     expect(route.distanceKm).toBeCloseTo(1.5)
   })
 })
+
+describe('waypoints', () => {
+  it('routes the loop through every user waypoint', async () => {
+    const mod = await loadRoute()
+    const urls = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url) => {
+        urls.push(String(url))
+        const square = [
+          ORIGIN,
+          offset(ORIGIN, 0, 300),
+          offset(ORIGIN, 300, 300),
+          offset(ORIGIN, 300, 0),
+          ORIGIN,
+        ]
+        return new Response(JSON.stringify(brouterResponse(square)), { status: 200 })
+      }),
+    )
+
+    const wp = offset(ORIGIN, 500, 500)
+    await mod.generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      profile: 'bike',
+      nature: false,
+      bearing: 0,
+      clockwise: true,
+      waypoints: [wp],
+    })
+
+    expect(urls[0]).toContain(`${wp[0].toFixed(6)},${wp[1].toFixed(6)}`)
+  })
+})

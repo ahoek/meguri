@@ -1,7 +1,13 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
-import { store, setStart } from '../store.js'
+import {
+  store,
+  setStart,
+  addWaypoint,
+  moveWaypoint,
+  removeWaypoint,
+} from '../store.js'
 import { distanceKm } from '../lib/geo.js'
 import { nav, preparedRoute, currentIndex } from '../lib/nav-session.js'
 import {
@@ -92,6 +98,32 @@ function ensureMarker(lngLat) {
 function clearRoute() {
   cancelAnimationFrame(animationFrame)
   map?.getSource('route')?.setData(EMPTY)
+}
+
+let wpMarkers = []
+
+/** Numbered pins for the stops; tap removes, drag moves. */
+function renderWaypoints() {
+  for (const m of wpMarkers) m.remove()
+  wpMarkers = []
+  if (nav.active) return
+  store.waypoints.forEach((lngLat, index) => {
+    const el = document.createElement('div')
+    el.className = 'wp-marker'
+    el.textContent = String(index + 1)
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      removeWaypoint(index)
+    })
+    const marker = new maplibregl.Marker({ element: el, draggable: true })
+      .setLngLat(lngLat)
+      .addTo(map)
+    marker.on('dragend', () => {
+      const p = marker.getLngLat()
+      moveWaypoint(index, [p.lng, p.lat])
+    })
+    wpMarkers.push(marker)
+  })
 }
 
 function drawRoute(route) {
@@ -459,6 +491,8 @@ function enterNavigation() {
   map.setLayoutProperty('traveled-line', 'visibility', 'visible')
   marker?.remove()
   marker = null
+  for (const m of wpMarkers) m.remove()
+  wpMarkers = []
 
   // Start the camera from wherever the planner left it and let the loop glide
   // in — zoom, tilt, padding and centre all travelling together.
@@ -488,6 +522,7 @@ function exitNavigation() {
   map.getSource('traveled')?.setData(EMPTY)
   map.setLayoutProperty('traveled-line', 'visibility', 'none')
   if (store.start) ensureMarker(store.start.lngLat)
+  renderWaypoints()
 
   // Flatten back to 2D as part of the same camera move: a separate easeTo
   // would be cancelled by fitBounds, leaving the map still pitched.
@@ -625,7 +660,11 @@ onMounted(() => {
 
   map.on('click', (e) => {
     if (nav.active) return // tapping the map must not relocate the route
-    setStart([e.lngLat.lng, e.lngLat.lat])
+    if (store.waypointMode && store.start) {
+      addWaypoint([e.lngLat.lng, e.lngLat.lat])
+    } else {
+      setStart([e.lngLat.lng, e.lngLat.lat])
+    }
   })
 
   watch(
@@ -635,6 +674,8 @@ onMounted(() => {
     },
     { immediate: true },
   )
+
+  watch(() => store.waypoints, renderWaypoints, { immediate: true })
 
   watch(
     () => store.route,

@@ -1,5 +1,6 @@
 import { reactive, watch } from 'vue'
 import { generateLoop } from './lib/route.js'
+import { distanceKm } from './lib/geo.js'
 import { reverseGeocode } from './lib/geocode.js'
 import { locale } from './i18n.js'
 import { nav, startNavigation } from './lib/nav-session.js'
@@ -14,6 +15,21 @@ const START_KEY = 'meguri-start'
 const PREFS_KEY = 'meguri-prefs'
 const ROUTE_KEY = 'meguri-route'
 const NAV_KEY = 'meguri-navigating'
+const WAYPOINTS_KEY = 'meguri-waypoints'
+
+function loadWaypoints() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WAYPOINTS_KEY))
+    if (Array.isArray(saved)) {
+      return saved.filter(
+        (p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]),
+      )
+    }
+  } catch {
+    /* corrupt or absent */
+  }
+  return []
+}
 
 /** The last generated route, so a refresh doesn't throw away your loop. */
 function loadSavedRoute() {
@@ -86,6 +102,8 @@ export const store = reactive({
   error: '',
   flyTo: null, // { center, zoom, id } — MapView watches this
   sheetInset: 0, // px of viewport covered by the mobile sheet; MapView pads around it
+  waypoints: loadWaypoints(), // [lng, lat][] the loop must pass through
+  waypointMode: false, // map taps add waypoints instead of moving the start
   bearing: Math.random() * 360,
   clockwise: Math.random() < 0.5,
 })
@@ -181,6 +199,14 @@ export function setStart(lngLat, label = null, { fly = false, zoom = 14 } = {}) 
     lngLat,
     label: label || `${lngLat[1].toFixed(4)}, ${lngLat[0].toFixed(4)}`,
   }
+  // Stops near the new start stay useful; ones left behind in another part
+  // of the world would only make every route attempt fail.
+  const reach = Math.max(targetKm() * 2, 10)
+  const kept = store.waypoints.filter((p) => distanceKm(p, lngLat) <= reach)
+  if (kept.length !== store.waypoints.length) {
+    store.waypoints = kept
+    persistWaypoints()
+  }
   if (fly) store.flyTo = { center: lngLat, zoom, id: ++flyId }
   persistStart()
   if (!label) {
@@ -200,6 +226,40 @@ function persistStart() {
   } catch {
     /* storage full or blocked — not critical */
   }
+}
+
+function persistWaypoints() {
+  try {
+    localStorage.setItem(WAYPOINTS_KEY, JSON.stringify(store.waypoints))
+  } catch {
+    /* storage full or blocked — not critical */
+  }
+}
+
+// A changed constraint invalidates the current loop, like moving the start.
+export function addWaypoint(lngLat) {
+  store.waypoints = [...store.waypoints, lngLat]
+  store.route = null
+  persistWaypoints()
+}
+
+export function moveWaypoint(index, lngLat) {
+  store.waypoints = store.waypoints.map((p, i) => (i === index ? lngLat : p))
+  store.route = null
+  persistWaypoints()
+}
+
+export function removeWaypoint(index) {
+  store.waypoints = store.waypoints.filter((_, i) => i !== index)
+  store.route = null
+  persistWaypoints()
+}
+
+export function clearWaypoints() {
+  store.waypoints = []
+  store.waypointMode = false
+  store.route = null
+  persistWaypoints()
 }
 
 export function locate() {
@@ -242,6 +302,7 @@ export async function generate({ shuffle = false } = {}) {
       nature: store.nature,
       bearing: store.bearing,
       clockwise: store.clockwise,
+      waypoints: store.waypoints,
       signal: abortController.signal,
     })
   } catch (err) {

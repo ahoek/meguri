@@ -142,6 +142,22 @@ input {
   }
 }
 
+/* ---- waypoint markers ---- */
+/* Fixed colours: the map tiles stay light in both themes. */
+.wp-marker {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: #0c111b;
+  color: #fff;
+  font: 700 12.5px/1 var(--font);
+  border: 2.5px solid #fff;
+  box-shadow: 0 2px 8px rgba(12, 17, 27, 0.4);
+  cursor: pointer;
+}
+
 /* ---- navigation puck ---- */
 .nav-puck {
   width: 46px;

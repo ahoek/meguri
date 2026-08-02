@@ -10,6 +10,7 @@ import {
   locate,
   generate,
   showError,
+  clearWaypoints,
 } from '../store.js'
 import { searchPlaces } from '../lib/geocode.js'
 import { downloadGpx } from '../lib/gpx.js'
@@ -207,6 +208,13 @@ function onStartNavigation() {
   if (!started) showError('errNoGeo')
 }
 
+const wpHint = computed(() => {
+  if (store.waypointMode) return t('wpArmed')
+  const n = store.waypoints.length
+  if (!n) return t('wpHint')
+  return `${n} ${t(n === 1 ? 'wpStop' : 'wpStops')}`
+})
+
 // Only worth a row when there is an actual choice to make.
 const chosenVoiceURI = computed(() => voiceChoice.value[locale.value] ?? '')
 const hasVoiceChoice = computed(() => availableVoices.value.length > 1)
@@ -360,6 +368,31 @@ const routeStats = computed(() => {
         {{ store.start.label }}
       </p>
       <p v-else class="hint">{{ t('tapMapHint') }}</p>
+
+      <label v-if="store.start" class="wp-row">
+        <svg class="wp-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
+        </svg>
+        <span class="wp-text">
+          <strong>{{ t('wpLabel') }}</strong>
+          <small>{{ wpHint }}</small>
+        </span>
+        <button
+          v-if="store.waypoints.length"
+          class="wp-clear"
+          @click.stop.prevent="clearWaypoints()"
+        >
+          {{ t('wpClear') }}
+        </button>
+        <input
+          class="switch"
+          type="checkbox"
+          role="switch"
+          :checked="store.waypointMode"
+          @change="store.waypointMode = $event.target.checked"
+        />
+      </label>
     </div>
 
     <div class="field-group">
@@ -1023,6 +1056,62 @@ const routeStats = computed(() => {
   to {
     transform: rotate(1turn);
   }
+}
+
+/* ---- waypoints ---- */
+.wp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 15px;
+  border-radius: 15px;
+  background: var(--field);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.wp-row:has(.switch:checked) {
+  background: var(--accent-soft);
+}
+
+.wp-icon {
+  flex: none;
+  width: 21px;
+  height: 21px;
+  color: var(--ink-3);
+}
+
+.wp-row:has(.switch:checked) .wp-icon {
+  color: var(--accent-1);
+}
+
+.wp-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.wp-text strong {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.wp-text small {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.wp-clear {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--hairline);
 }
 
 /* ---- voice choice ---- */
