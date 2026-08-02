@@ -136,6 +136,37 @@ const progress = computed(() => {
     </div>
 
     <div class="bottom">
+    <!-- Voice and recenter float above the bar so the figures below can be
+         big enough to read from a bike. -->
+    <div class="side-actions">
+      <button
+        class="round-btn"
+        :class="{ on: nav.voice }"
+        :aria-label="t('navVoice')"
+        :aria-pressed="nav.voice"
+        :title="t('navVoice')"
+        @click="onVoiceToggle"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="currentColor" />
+          <path v-if="nav.voice" d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <path v-else d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button
+        class="round-btn"
+        :aria-label="t('navRecenter')"
+        :title="t('navRecenter')"
+        @click="emit('recenter')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2" fill="currentColor" />
+          <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="M12 1.5v3.5M12 19v3.5M22.5 12H19M5 12H1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
     <!-- Bottom bar -->
     <div class="dash">
       <div class="progress" role="presentation">
@@ -150,35 +181,7 @@ const progress = computed(() => {
           <span class="metric-value">{{ eta }}</span>
           <span class="metric-label">{{ arrivalClock }}</span>
         </div>
-        <div class="dash-actions">
-          <button
-            class="round-btn"
-            :class="{ on: nav.voice }"
-            :aria-label="t('navVoice')"
-            :aria-pressed="nav.voice"
-            :title="t('navVoice')"
-            @click="onVoiceToggle"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="currentColor" />
-              <path v-if="nav.voice" d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-              <path v-else d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button
-            class="round-btn"
-            :aria-label="t('navRecenter')"
-            :title="t('navRecenter')"
-            @click="emit('recenter')"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="3.2" fill="currentColor" />
-              <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2" />
-              <path d="M12 1.5v3.5M12 19v3.5M22.5 12H19M5 12H1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button class="exit-btn" @click="stopNavigation">{{ t('navExit') }}</button>
-        </div>
+        <button class="exit-btn" @click="stopNavigation">{{ t('navExit') }}</button>
       </div>
     </div>
     </div>
@@ -324,65 +327,69 @@ const progress = computed(() => {
 .dash-row {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 13px 16px;
+  gap: 20px;
+  padding: 14px 18px;
 }
 
 .metric {
   min-width: 0;
-}
-
-.metric {
   display: flex;
   flex-direction: column;
 }
 
 .metric-value {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 31px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .metric-label {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-3);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
-.dash-actions {
+.side-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  flex-direction: column;
+  gap: 10px;
+  align-self: flex-end;
+  margin: 0 14px 12px 0;
 }
 
 .round-btn {
-  width: 42px;
-  height: 42px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--field);
-  color: var(--ink-3);
+  /* These sit over the map now, so they carry their own surface. */
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(1.6);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  color: var(--ink-2);
   transition: background 0.2s, color 0.2s;
 }
 
 .round-btn.on {
-  background: var(--accent-soft);
   color: var(--accent-1);
 }
 
 .round-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 23px;
+  height: 23px;
 }
 
 .exit-btn {
-  padding: 11px 18px;
+  margin-left: auto;
+  padding: 12px 18px;
   border-radius: 13px;
   font-size: 15px;
   font-weight: 700;
@@ -397,7 +404,8 @@ const progress = computed(() => {
     margin-right: auto;
   }
 
-  .dash {
+  .bottom {
+    width: 100%;
     max-width: 460px;
     margin-left: auto;
     margin-right: auto;
