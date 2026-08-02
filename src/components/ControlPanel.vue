@@ -36,7 +36,10 @@ let searchAbort: AbortController | null = null
 const collapsed = ref(false)
 const isMobile = () => matchMedia('(max-width: 760px)').matches
 const panelEl = ref<HTMLElement | null>(null)
-const HANDLE_H = 58 // keep in sync with --handle-h
+const sheetTopEl = ref<HTMLElement | null>(null)
+// The strip grows by the safe-area inset on phones with rounded corners, so
+// measure it rather than assuming the base 58px.
+const handleH = () => sheetTopEl.value?.offsetHeight ?? 58
 
 watch(
   () => store.route,
@@ -55,7 +58,7 @@ watch(
 // The sheet tracks the finger while dragging and snaps on release, judged by
 // flick velocity first and position second — the fixed-threshold swipe it
 // replaces ignored both, which is what made it feel non-native.
-const collapsedOffset = () => (panelEl.value?.offsetHeight ?? 0) - HANDLE_H
+const collapsedOffset = () => (panelEl.value?.offsetHeight ?? 0) - handleH()
 
 interface SheetDrag {
   startY: number
@@ -117,8 +120,8 @@ function publishInset() {
     return
   }
   store.sheetInset = collapsed.value
-    ? HANDLE_H
-    : (panelEl.value?.offsetHeight ?? HANDLE_H)
+    ? handleH()
+    : (panelEl.value?.offsetHeight ?? handleH())
 }
 
 watch(collapsed, publishInset)
@@ -240,7 +243,7 @@ const routeStats = computed(() => {
 
 <template>
   <section ref="panelEl" class="panel" :class="{ collapsed }" aria-label="Route planner">
-    <div class="sheet-top">
+    <div ref="sheetTopEl" class="sheet-top">
       <button
         class="sheet-handle"
         :aria-expanded="!collapsed"
@@ -574,11 +577,14 @@ const routeStats = computed(() => {
 }
 
 .panel {
+  /* Grown by the bottom safe-area inset on mobile, so the collapsed strip
+     clears the rounded screen corners and the home indicator. */
   --handle-h: 58px;
 }
 
 @media (max-width: 760px) {
   .panel {
+    --handle-h: calc(58px + env(safe-area-inset-bottom, 0px));
     left: 0;
     right: 0;
     bottom: 0;
@@ -615,6 +621,10 @@ const routeStats = computed(() => {
     align-items: center;
     flex: none;
     height: var(--handle-h);
+    /* Keep the grabber and buttons in the flat part of the screen. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
   }
 
   .sheet-handle {

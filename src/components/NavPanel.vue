@@ -216,7 +216,9 @@ const progress = computed(() => {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin: calc(12px + env(safe-area-inset-top)) 12px 0;
+  margin: calc(12px + env(safe-area-inset-top))
+    calc(12px + env(safe-area-inset-right)) 0
+    calc(12px + env(safe-area-inset-left));
   padding: 16px 20px;
   border-radius: 22px;
   color: #fff;
@@ -303,7 +305,8 @@ const progress = computed(() => {
 
 /* ---- bottom dashboard ---- */
 .dash {
-  margin: 0 12px calc(12px + env(safe-area-inset-bottom));
+  margin: 0 calc(12px + env(safe-area-inset-right))
+    calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
   border-radius: 22px;
   overflow: hidden;
   background: var(--surface);
@@ -359,7 +362,7 @@ const progress = computed(() => {
   flex-direction: column;
   gap: 10px;
   align-self: flex-end;
-  margin: 0 14px 12px 0;
+  margin: 0 calc(14px + env(safe-area-inset-right)) 12px 0;
 }
 
 .round-btn {
