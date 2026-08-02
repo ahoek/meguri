@@ -88,3 +88,53 @@ describe('trimming out-and-back spurs', () => {
     expect(route.voicehints[0][0]).toBe(1)
   })
 })
+
+describe('scoring loop candidates', () => {
+  // Backtracking weighs heavier than missing the target length: a loop half
+  // a kilometre long-of-target must still beat an exact one that rides the
+  // same road twice.
+  it('prefers a clean loop over an exact one that doubles back', async () => {
+    const mod = await loadRoute()
+
+    const a = ORIGIN
+    const b = offset(a, 0, 200)
+    // Runs the a–b road in both directions (~16% of its length doubled),
+    // but its reported length matches the 1 km target exactly.
+    const doubled = [a, b, offset(b, 300, 0), offset(a, 300, 0), b, a]
+    // No doubling, but half a kilometre over target.
+    const clean = [a, offset(a, 0, 300), offset(a, 300, 300), offset(a, 300, 0), a]
+
+    const response = (coordinates, lengthM) =>
+      new Response(
+        JSON.stringify({
+          features: [
+            {
+              geometry: { type: 'LineString', coordinates },
+              properties: {
+                'track-length': String(lengthM),
+                'total-time': '300',
+                voicehints: [],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      )
+
+    const fetchMock = vi.fn(async () => response(clean, 1500))
+    fetchMock.mockImplementationOnce(async () => response(doubled, 1000))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const route = await mod.generateLoop({
+      start: a,
+      targetKm: 1,
+      profile: 'bike',
+      nature: false,
+      bearing: 0,
+      clockwise: true,
+    })
+
+    expect(route.geometry.coordinates).toHaveLength(clean.length)
+    expect(route.distanceKm).toBeCloseTo(1.5)
+  })
+})

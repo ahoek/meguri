@@ -173,12 +173,13 @@ export async function generateLoop({
 }) {
   let radius = Math.max(0.12, targetKm / (2 * Math.PI))
   let currentBearing = bearing
+  let viaCount = 4
   let best = null
   let bestScore = Infinity
   let lastError = null
 
   for (let attempt = 0; attempt < 7; attempt++) {
-    const via = loopViaPoints(start, radius, currentBearing, clockwise, 4)
+    const via = loopViaPoints(start, radius, currentBearing, clockwise, viaCount)
 
     let route
     try {
@@ -209,7 +210,9 @@ export async function generateLoop({
 
     const distErr = Math.abs(route.distanceKm - targetKm) / targetKm
     const overlap = overlapFraction(route.geometry.coordinates)
-    const score = distErr + overlap * 2.5
+    // Riding the same road twice annoys more than a kilometre missing, so
+    // overlap dominates the score.
+    const score = distErr + overlap * 4
 
     if (score < bestScore) {
       best = route
@@ -217,9 +220,12 @@ export async function generateLoop({
     }
     if (distErr < 0.06 && overlap < 0.08) break
 
-    if (overlap > 0.15) {
-      // Stuck in a spot that forces doubling back — try different terrain.
+    if (overlap > 0.08) {
+      // Doubling back: swing towards new terrain, and pin the loop to its
+      // circle with an extra via point so two legs can't collapse onto the
+      // same road between them.
       currentBearing += 47
+      viaCount = Math.min(viaCount + 1, 7)
     }
     const ratio = route.distanceKm / targetKm
     radius = Math.min(Math.max(radius / ratio, radius * 0.45), radius * 2.2)
