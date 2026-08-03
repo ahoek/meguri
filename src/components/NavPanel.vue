@@ -152,14 +152,42 @@ function publishBannerInset() {
   store.bannerInset = Math.round(el.getBoundingClientRect().bottom)
 }
 
+/**
+ * How much of the bottom of the screen the dashboard occupies, margin and safe
+ * area included, so anything floating above it can sit just clear of it.
+ *
+ * Measured rather than written down: the dashboard's height moves with the
+ * wording — a two-hour estimate in Japanese is not the same box as "55 min" —
+ * and a constant would be wrong in exactly the languages nobody checks.
+ */
+const navEl = ref<HTMLElement | null>(null)
+const dashEl = ref<HTMLElement | null>(null)
+const dashInset = ref(0)
+let dashObserver: ResizeObserver | null = null
+
+function measureDash() {
+  const nav = navEl.value
+  const dash = dashEl.value
+  if (!nav || !dash) return
+  dashInset.value = Math.round(
+    nav.getBoundingClientRect().bottom - dash.getBoundingClientRect().top,
+  )
+}
+
 onMounted(() => {
   publishBannerInset()
   bannerObserver = new ResizeObserver(publishBannerInset)
   if (bannerEl.value) bannerObserver.observe(bannerEl.value)
+
+  measureDash()
+  dashObserver = new ResizeObserver(measureDash)
+  if (dashEl.value) dashObserver.observe(dashEl.value)
+  if (navEl.value) dashObserver.observe(navEl.value)
 })
 
 onBeforeUnmount(() => {
   bannerObserver?.disconnect()
+  dashObserver?.disconnect()
   store.bannerInset = 0
 })
 
@@ -207,7 +235,12 @@ const progress = computed(() => {
 </script>
 
 <template>
-  <div class="nav" :class="{ arrived: nav.arrived }">
+  <div
+    ref="navEl"
+    class="nav"
+    :class="{ arrived: nav.arrived }"
+    :style="{ '--dash-inset': dashInset + 'px' }"
+  >
     <!-- Instruction banner -->
     <!-- Only colour it as a warning when it is actually warning about
          something; re-acquiring GPS shouldn't come up red. -->
@@ -266,11 +299,11 @@ const progress = computed(() => {
       </template>
     </div>
 
-    <div class="bottom">
-    <!-- One row above the dash, buttons right and the compass note left of
-         them. Stacked instead, the note appearing shoved the buttons up the
-         screen — a warning that moves the controls you were reaching for. -->
-    <div class="above-dash">
+    <!-- Out of the flow entirely, anchored to the bottom-left above the dash.
+         Sharing a container with the buttons went wrong twice: stacked, it
+         pushed them up the screen; in a row, dismissing it dropped them to the
+         left. It has nothing to say about where they go, so it is no longer in
+         a position to. `--dash-inset` is measured, not guessed. -->
     <Transition name="compass">
       <div
         v-if="compassProblem && !compassDismissed"
@@ -302,6 +335,7 @@ const progress = computed(() => {
       </div>
     </Transition>
 
+    <div class="bottom">
     <!-- Voice and recenter float above the bar so the figures below can be
          big enough to read from a bike. -->
     <div class="side-actions">
@@ -359,10 +393,9 @@ const progress = computed(() => {
         </svg>
       </button>
     </div>
-    </div>
 
     <!-- Bottom bar -->
-    <div class="dash">
+    <div ref="dashEl" class="dash">
       <div class="progress" role="presentation">
         <div class="progress-fill" :style="{ width: progress + '%' }"></div>
       </div>
@@ -412,21 +445,6 @@ const progress = computed(() => {
   pointer-events: none;
 }
 
-/* The row above the dash. Its height is set by the button stack, so the
-   compass note can come and go without the buttons moving under the thumb
-   that was reaching for them. Both hug the bottom of the row. */
-.above-dash {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-  /* Full width, so it must not swallow taps meant for the map. */
-  pointer-events: none;
-}
-
-.above-dash > * {
-  pointer-events: auto;
-}
 
 /* ---- instruction banner ---- */
 .banner {
@@ -597,12 +615,15 @@ const progress = computed(() => {
    across the middle of the map, so it is a chip now — sized to its words,
    tucked to the left opposite the round buttons, and quiet enough to ignore. */
 .compass-note {
+  position: absolute;
+  left: calc(12px + env(safe-area-inset-left));
+  /* Just clear of the dashboard, whatever height it has taken. */
+  bottom: calc(var(--dash-inset, 102px) + 10px);
   display: flex;
   align-items: center;
   gap: 7px;
-  /* Room for the buttons beside it on the narrowest phone. */
+  /* Clear of the round buttons on the right, on the narrowest phone. */
   max-width: min(58%, 270px);
-  margin: 0 0 12px calc(12px + env(safe-area-inset-left));
   padding: 7px 9px 7px 11px;
   border-radius: 12px;
   background: var(--surface);
@@ -673,12 +694,13 @@ const progress = computed(() => {
   translate: 0 8px;
 }
 
+/* Right-hand edge, its own business. Nothing else shares this column. */
 .side-actions {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  flex: none;
+  align-self: flex-end;
   margin: 0 calc(14px + env(safe-area-inset-right)) 12px 0;
 }
 
