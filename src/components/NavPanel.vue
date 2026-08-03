@@ -267,6 +267,41 @@ const progress = computed(() => {
     </div>
 
     <div class="bottom">
+    <!-- One row above the dash, buttons right and the compass note left of
+         them. Stacked instead, the note appearing shoved the buttons up the
+         screen — a warning that moves the controls you were reaching for. -->
+    <div class="above-dash">
+    <Transition name="compass">
+      <div
+        v-if="compassProblem && !compassDismissed"
+        class="compass-note"
+        :class="{ actionable: compassProblem.retry }"
+      >
+        <svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="m15 9-2.2 5-4.8 1 2.2-5z" fill="currentColor" />
+        </svg>
+        <!-- Only a note worth tapping becomes a button; the rest is text. -->
+        <component
+          :is="compassProblem.retry ? 'button' : 'span'"
+          class="compass-text"
+          @click="compassProblem.retry && retryCompass()"
+        >
+          {{ compassProblem.text }}
+        </component>
+        <button
+          class="compass-dismiss"
+          :aria-label="t('dismiss')"
+          :title="t('dismiss')"
+          @click="compassDismissed = true"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </Transition>
+
     <!-- Voice and recenter float above the bar so the figures below can be
          big enough to read from a bike. -->
     <div class="side-actions">
@@ -324,39 +359,7 @@ const progress = computed(() => {
         </svg>
       </button>
     </div>
-
-    <!-- Last before the dash, so it sits in the furniture at the foot of the
-         screen rather than out over the map. -->
-    <Transition name="compass">
-      <div
-        v-if="compassProblem && !compassDismissed"
-        class="compass-note"
-        :class="{ actionable: compassProblem.retry }"
-      >
-        <svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
-          <path d="m15 9-2.2 5-4.8 1 2.2-5z" fill="currentColor" />
-        </svg>
-        <!-- Only a note worth tapping becomes a button; the rest is text. -->
-        <component
-          :is="compassProblem.retry ? 'button' : 'span'"
-          class="compass-text"
-          @click="compassProblem.retry && retryCompass()"
-        >
-          {{ compassProblem.text }}
-        </component>
-        <button
-          class="compass-dismiss"
-          :aria-label="t('dismiss')"
-          :title="t('dismiss')"
-          @click="compassDismissed = true"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-    </Transition>
+    </div>
 
     <!-- Bottom bar -->
     <div class="dash">
@@ -407,6 +410,22 @@ const progress = computed(() => {
   display: flex;
   flex-direction: column;
   pointer-events: none;
+}
+
+/* The row above the dash. Its height is set by the button stack, so the
+   compass note can come and go without the buttons moving under the thumb
+   that was reaching for them. Both hug the bottom of the row. */
+.above-dash {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  /* Full width, so it must not swallow taps meant for the map. */
+  pointer-events: none;
+}
+
+.above-dash > * {
+  pointer-events: auto;
 }
 
 /* ---- instruction banner ---- */
@@ -581,9 +600,9 @@ const progress = computed(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  align-self: flex-start;
-  max-width: min(64%, 290px);
-  margin: 0 0 10px calc(12px + env(safe-area-inset-left));
+  /* Room for the buttons beside it on the narrowest phone. */
+  max-width: min(58%, 270px);
+  margin: 0 0 12px calc(12px + env(safe-area-inset-left));
   padding: 7px 9px 7px 11px;
   border-radius: 12px;
   background: var(--surface);
@@ -659,7 +678,7 @@ const progress = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  align-self: flex-end;
+  flex: none;
   margin: 0 calc(14px + env(safe-area-inset-right)) 12px 0;
 }
 
