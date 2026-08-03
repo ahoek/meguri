@@ -267,37 +267,6 @@ const progress = computed(() => {
     </div>
 
     <div class="bottom">
-    <Transition name="compass">
-      <div
-        v-if="compassProblem && !compassDismissed"
-        class="compass-note"
-        :class="{ actionable: compassProblem.retry }"
-      >
-        <svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
-          <path d="m15 9-2.2 5-4.8 1 2.2-5z" fill="currentColor" />
-        </svg>
-        <!-- Only a note worth tapping becomes a button; the rest is text. -->
-        <component
-          :is="compassProblem.retry ? 'button' : 'span'"
-          class="compass-text"
-          @click="compassProblem.retry && retryCompass()"
-        >
-          {{ compassProblem.text }}
-        </component>
-        <button
-          class="compass-dismiss"
-          :aria-label="t('dismiss')"
-          :title="t('dismiss')"
-          @click="compassDismissed = true"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-    </Transition>
-
     <!-- Voice and recenter float above the bar so the figures below can be
          big enough to read from a bike. -->
     <div class="side-actions">
@@ -355,6 +324,39 @@ const progress = computed(() => {
         </svg>
       </button>
     </div>
+
+    <!-- Last before the dash, so it sits in the furniture at the foot of the
+         screen rather than out over the map. -->
+    <Transition name="compass">
+      <div
+        v-if="compassProblem && !compassDismissed"
+        class="compass-note"
+        :class="{ actionable: compassProblem.retry }"
+      >
+        <svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="m15 9-2.2 5-4.8 1 2.2-5z" fill="currentColor" />
+        </svg>
+        <!-- Only a note worth tapping becomes a button; the rest is text. -->
+        <component
+          :is="compassProblem.retry ? 'button' : 'span'"
+          class="compass-text"
+          @click="compassProblem.retry && retryCompass()"
+        >
+          {{ compassProblem.text }}
+        </component>
+        <button
+          class="compass-dismiss"
+          :aria-label="t('dismiss')"
+          :title="t('dismiss')"
+          @click="compassDismissed = true"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </Transition>
 
     <!-- Bottom bar -->
     <div class="dash">
@@ -570,37 +572,48 @@ const progress = computed(() => {
   white-space: nowrap;
 }
 
-/* ---- compass trouble ---- */
+/* ---- compass trouble ----
+   An aside, not an alarm: the arrow still points somewhere sensible without a
+   compass, it just doesn't turn with your wrist. Full width made it a band
+   across the middle of the map, so it is a chip now — sized to its words,
+   tucked to the left opposite the round buttons, and quiet enough to ignore. */
 .compass-note {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin: 0 calc(12px + env(safe-area-inset-right)) 10px
-    calc(12px + env(safe-area-inset-left));
-  padding: 10px 14px;
-  border-radius: 14px;
+  gap: 7px;
+  align-self: flex-start;
+  max-width: min(64%, 290px);
+  margin: 0 0 10px calc(12px + env(safe-area-inset-left));
+  padding: 7px 9px 7px 11px;
+  border-radius: 12px;
   background: var(--surface);
   backdrop-filter: blur(18px) saturate(1.6);
   -webkit-backdrop-filter: blur(18px) saturate(1.6);
   border: 1px solid var(--hairline);
-  box-shadow: var(--shadow);
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.3;
+  box-shadow: 0 4px 14px -8px rgba(12, 17, 27, 0.5);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
   text-align: left;
-  color: var(--ink-2);
+  color: var(--ink-3);
 }
 
 .compass-icon {
   flex: none;
-  width: 19px;
-  height: 19px;
-  color: #b45309;
+  width: 15px;
+  height: 15px;
+  color: var(--ink-3);
+  opacity: 0.8;
 }
 
+/* Tappable, so it earns a little more ink than the ones that can only be read. */
 .compass-note.actionable {
-  color: var(--ink);
-  border-color: #b45309;
+  color: var(--ink-2);
+}
+
+.compass-note.actionable .compass-icon {
+  color: #b45309;
+  opacity: 1;
 }
 
 /* Inherits the note's type so a button and a span read identically. */
@@ -616,16 +629,18 @@ const progress = computed(() => {
   flex: none;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  margin: -4px -6px -4px 0;
+  /* Small to look at, but still a thumb-sized target. */
+  width: 26px;
+  height: 26px;
+  margin: -6px -5px -6px 0;
   border-radius: 50%;
   color: var(--ink-3);
+  opacity: 0.65;
 }
 
 .compass-dismiss svg {
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
 }
 
 .compass-enter-active,
