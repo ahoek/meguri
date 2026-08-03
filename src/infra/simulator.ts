@@ -18,9 +18,19 @@ import type { LngLat } from '../domain/geo'
  * are noisy, the speed drifts, and it can be told to take a wrong turn.
  */
 
-// Consumer GPS updates about this often, and pretending to be faster would make
-// the eased camera look smoother than it is on a real ride.
+/**
+ * Consumer GPS updates about this often, and pretending to be faster would make
+ * the eased camera look smoother than it is on a real ride.
+ *
+ * But speeding up the demo has to speed up the receiver's clock with it. Held
+ * at one second while the walker moves four times as fast, each fix lands four
+ * times further on, and the map advances in strides no real pace produces —
+ * which read as the app stuttering rather than the demo being fast. What has to
+ * stay true to life is the metres between fixes, not the seconds.
+ */
 const FIX_INTERVAL_MS = 1000
+// Not below this, however fast the demo runs: every fix is a route projection.
+const MIN_FIX_INTERVAL_MS = 100
 
 // Sideways scatter, in metres. Real fixes wander this much between buildings
 // and under trees, and it is the reason the arrow is drawn beside the line
@@ -78,7 +88,12 @@ export function startSimulation(opts: Options): Simulation {
   let paused = false
   let straying = false
   let strayM = 0
-  let timer: ReturnType<typeof setInterval> | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  /** Faster demo, faster receiver — so the ground covered per fix holds. */
+  function intervalMs() {
+    return Math.max(FIX_INTERVAL_MS / speed, MIN_FIX_INTERVAL_MS)
+  }
 
   function emit() {
     const bearing = bearingAlong(opts.route, alongKm)
@@ -88,7 +103,7 @@ export function startSimulation(opts: Options): Simulation {
 
     if (!paused) {
       alongKm = Math.min(
-        alongKm + (paceKmh / 3600) * (FIX_INTERVAL_MS / 1000),
+        alongKm + (paceKmh / 3600) * (intervalMs() / 1000),
         opts.route.totalKm,
       )
     }
@@ -121,14 +136,23 @@ export function startSimulation(opts: Options): Simulation {
     } as GeolocationPosition)
   }
 
+  // Rescheduled each time rather than a fixed interval, because changing the
+  // demo speed changes how often a fix is due.
+  function schedule() {
+    timer = setTimeout(() => {
+      emit()
+      schedule()
+    }, intervalMs())
+  }
+
   // A real watch delivers the first fix promptly rather than after a full
   // interval, and the wait is what the "waiting for GPS" banner is for.
   emit()
-  timer = setInterval(emit, FIX_INTERVAL_MS)
+  schedule()
 
   return {
     stop() {
-      clearInterval(timer)
+      clearTimeout(timer)
       timer = undefined
     },
     setSpeed(factor: number) {
@@ -143,9 +167,16 @@ export function startSimulation(opts: Options): Simulation {
   }
 }
 
-/** Which way the simulated walker is facing, for the compass to answer with. */
+/**
+ * Which way the simulated walker is facing, for the compass to answer with.
+ *
+ * Just the road ahead, and deliberately nothing more. A first version added a
+ * few degrees of sway on the theory that a held phone is never still — but on
+ * foot the camera takes its bearing from the compass, and follows it quickly
+ * because a compass answers to your wrist. So four degrees of invented sway
+ * became the entire map rocking back and forth every few seconds, which is not
+ * a phone being held, it is a demo looking broken.
+ */
 export function simulatedHeading(route: PreparedRoute, alongKm: number): number {
-  // A held phone sways; a compass reading that never moves looks broken.
-  const sway = Math.sin(Date.now() / 900) * 4
-  return (bearingAlong(route, alongKm) + sway + 360) % 360
+  return bearingAlong(route, alongKm)
 }

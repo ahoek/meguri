@@ -28,6 +28,11 @@ Available in English, Dutch and Japanese. Installable as a PWA.
   meaningless at walking pace; on a bike they follow the road ahead.
 - **Wrong turn?** It routes you back to the loop rather than rewriting it — a
   round trip of a chosen length only stays that if it survives intact.
+- **Demo mode.** A button beside Start hands navigation a receiver that walks
+  the loop by itself — scattered fixes, drifting pace, and a wrong turn on
+  request — so the whole thing can be shown without going outside. It says on
+  screen that the position is invented, and a demo is never resumed as a real
+  session.
 - **GPX export** with elevation, for a watch or bike computer.
 - **Remembers your session** — settings, the last loop, and navigation itself
   survive a refresh.
@@ -49,7 +54,7 @@ enable BRouter's forest, town, noise and traffic estimates, add turn
 instructions to the walking profile (the stock one emits none), and put a
 heavy penalty on sand, mud and other loose surfaces so the nature preference
 can't route a bike across a beach. They are registered with BRouter at runtime
-and cached; bump `PROFILE_VERSION` in `src/lib/route.js` when a `.brf` changes.
+and cached; bump `PROFILE_VERSION` in `src/infra/brouter.ts` when a `.brf` changes.
 
 | Service | Used for |
 | --- | --- |
@@ -113,7 +118,10 @@ to check by riding around: locating yourself on a loop whose finish sits on
 its start, rejecting GPS jumps without freezing progress, dropping the pace
 to zero when you stop, needing several fixes off the line before calling a
 wrong turn, taking the direction of the road rather than an average across a
-corner, and re-indexing turn instructions when spurs are trimmed. Most of
+corner, and re-indexing turn instructions when spurs are trimmed. The demo's
+simulated receiver is pinned down too: that it scatters, drifts, strays far
+enough to be called a wrong turn, and covers the same ground between fixes
+however fast it is told to run. Most of
 these exist because that exact case went wrong on a real ride.
 
 ### Deployment

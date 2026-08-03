@@ -90,6 +90,42 @@ describe('the demo walker', () => {
     expect(end(fast.fixes)).toBeGreaterThan(end(slow.fixes) * 3)
   })
 
+  /**
+   * The reason a sped-up demo looked like the app stuttering. Held at one fix a
+   * second while the walker moves ten times as fast, each fix lands ten times
+   * further on and the map advances in strides no real pace produces. What has
+   * to stay true to life is the ground covered between fixes.
+   */
+  it('keeps the ground covered between fixes realistic at any speed', () => {
+    const route = loop()
+    const step = (factor: number) => {
+      const { fixes, sim } = run(route, 30, { paceKmh: 4.8, speed: factor })
+      sim.stop()
+      const gaps: number[] = []
+      for (let i = 1; i < fixes.length; i++) {
+        gaps.push(metresBetween(fixes[i - 1].lngLat, fixes[i].lngLat))
+      }
+      // Median, so the jitter's outliers don't set the figure.
+      return gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)]
+    }
+
+    const real = step(1)
+    for (const factor of [4, 10]) {
+      // Within a couple of metres of the real thing — the scatter is that big.
+      expect(Math.abs(step(factor) - real)).toBeLessThan(2.5)
+    }
+  })
+
+  it('delivers fixes more often the faster it is told to go', () => {
+    const route = loop()
+    const count = (factor: number) => {
+      const { fixes, sim } = run(route, 20, { speed: factor })
+      sim.stop()
+      return fixes.length
+    }
+    expect(count(4)).toBeGreaterThan(count(1) * 3)
+  })
+
   // Welded to the centreline, the demo would never exercise the sideways
   // offset the real navigator spends its time deciding about.
   it('scatters its fixes the way a receiver does', () => {

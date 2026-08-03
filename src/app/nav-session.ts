@@ -591,14 +591,26 @@ export function retryCompass() {
   return startCompass()
 }
 
-/** How much of the gap to a fresh fix to close per frame, and how far we may
- *  guess ahead between fixes. A walker covers 1.4 m/s, so there is little to
- *  gain from dead reckoning and plenty to lose — every guessed metre is one
- *  that may have to be taken back. A rider covers four times that, where
- *  carrying the position forward is what keeps the map from lurching. */
+/**
+ * How much of the gap to a fresh fix to close per frame, and how far we may
+ * guess ahead between fixes.
+ *
+ * A walker covers 1.4 m/s, so there is little to gain from dead reckoning and
+ * plenty to lose — every guessed metre is one that may have to be taken back. A
+ * rider covers four times that, where carrying the position forward is what
+ * keeps the map from lurching.
+ *
+ * Walking closes the gap slowly all the same. Fixes arrive about once a second;
+ * at the old rate the arrow covered the metre and a half between them inside a
+ * sixth of one and then stood still for the rest, which reads as a pulse rather
+ * than as walking. Easing over most of the second costs about fifteen extra
+ * centimetres of lag and buys continuous motion — and it is still only ever
+ * interpolating towards a position we have been given, never inventing one
+ * beyond it, which is the part that would have to be taken back.
+ */
 export function reckoning() {
   return profileMode === 'walk'
-    ? { maxSeconds: 0, damping: 0, maxKm: 0, positionEase: 0.24 }
+    ? { maxSeconds: 0, damping: 0, maxKm: 0, positionEase: 0.09 }
     : { maxSeconds: 3, damping: 0.5, maxKm: 0.012, positionEase: 0.1 }
 }
 
