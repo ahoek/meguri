@@ -63,6 +63,39 @@ export function groundWidth(metres: number, lat: number, minPx: number) {
   ] as maplibregl.ExpressionSpecification
 }
 
+/**
+ * A chevron pointing along the line, drawn rather than shipped as a sprite —
+ * one icon isn't worth an asset pipeline, and generating it means the outline
+ * and the fill stay in step with the width constants above.
+ *
+ * `symbol-placement: line` rotates an icon so its +x axis follows the line, so
+ * this points right.
+ */
+const ARROW_PX = 30
+
+function arrowImage(): maplibregl.StyleImageInterface | ImageData {
+  const canvas = document.createElement('canvas')
+  canvas.width = ARROW_PX
+  canvas.height = ARROW_PX
+  const g = canvas.getContext('2d')!
+  const s = ARROW_PX
+  g.lineCap = 'round'
+  g.lineJoin = 'round'
+  g.beginPath()
+  g.moveTo(s * 0.33, s * 0.22)
+  g.lineTo(s * 0.7, s * 0.5)
+  g.lineTo(s * 0.33, s * 0.78)
+  // Dark under, white over: legible against both halves of either gradient,
+  // and against the grey of the stretch already ridden.
+  g.strokeStyle = 'rgba(15, 23, 42, 0.45)'
+  g.lineWidth = s * 0.26
+  g.stroke()
+  g.strokeStyle = '#ffffff'
+  g.lineWidth = s * 0.13
+  g.stroke()
+  return g.getImageData(0, 0, ARROW_PX, ARROW_PX)
+}
+
 export function createRouteLayers(map: maplibregl.Map) {
   const source = (id: string) =>
     map.getSource(id) as maplibregl.GeoJSONSource | undefined
@@ -107,6 +140,24 @@ export function createRouteLayers(map: maplibregl.Map) {
         },
       })
 
+      // The gap between where you are standing and where that path begins.
+      // Deliberately a different animal from the path itself — round dots, no
+      // casing, half opacity — because it is a straight line across whatever
+      // happens to be in the way and must not be mistaken for a route.
+      map.addSource('rejoin-leader', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'rejoin-leader',
+        type: 'line',
+        source: 'rejoin-leader',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#f59e0b',
+          'line-width': 3.5,
+          'line-opacity': 0.55,
+          'line-dasharray': [0.1, 1.8],
+        },
+      })
+
       // Drawn over the route while navigating, greying out what's behind you.
       map.addSource('traveled', { type: 'geojson', data: EMPTY })
       map.addLayer({
@@ -118,6 +169,43 @@ export function createRouteLayers(map: maplibregl.Map) {
           'line-color': '#94a3b8',
           'line-width': groundWidth(PATH_WIDTH_M, lat, 5),
           'line-opacity': 0.85,
+        },
+      })
+
+      // Which way round the loop goes. A gradient answers that only if you
+      // know which end is which colour; an arrow answers it on sight. Added
+      // last so the chevrons ride over the grey of the part already covered.
+      if (!map.hasImage('route-arrow')) {
+        map.addImage('route-arrow', arrowImage(), { pixelRatio: 2.6 })
+      }
+      map.addLayer({
+        id: 'route-arrows',
+        type: 'symbol',
+        source: 'route',
+        minzoom: 11,
+        layout: {
+          'symbol-placement': 'line',
+          // Far enough apart to be a hint rather than a barcode, and closer
+          // together as you zoom in so a single street still carries one.
+          'symbol-spacing': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            11,
+            55,
+            16,
+            85,
+            20,
+            120,
+          ],
+          'icon-image': 'route-arrow',
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 11, 0.55, 16, 0.8, 20, 1],
+          // The route line is drawn to a ground width, so the arrows have to
+          // lie on the ground with it rather than standing up at the camera.
+          'icon-rotation-alignment': 'map',
+          'icon-pitch-alignment': 'map',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       })
     },
@@ -163,12 +251,18 @@ export function createRouteLayers(map: maplibregl.Map) {
       source('rejoin')?.setData(coords ? lineFeature(coords) : EMPTY)
     },
 
+    /** The dotted hop from where you stand to where the way back begins. */
+    setRejoinLeader(coords: LngLat[] | null) {
+      source('rejoin-leader')?.setData(coords ? lineFeature(coords) : EMPTY)
+    },
+
     showTraveled(visible: boolean) {
       map.setLayoutProperty('traveled-line', 'visibility', visible ? 'visible' : 'none')
     },
 
     clearNavigationLines() {
       source('rejoin')?.setData(EMPTY)
+      source('rejoin-leader')?.setData(EMPTY)
       source('traveled')?.setData(EMPTY)
     },
 

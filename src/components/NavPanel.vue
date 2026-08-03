@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { store } from '../app/store'
 import {
   nav,
@@ -48,6 +48,19 @@ const ARROW_HEAD: Record<string, string> = {
 }
 
 const kind = computed(() => nav.maneuver?.kind ?? 'continue')
+
+/**
+ * A turn landing on top of the next one is part of the same instruction.
+ *
+ * On foot the phone comes out at the fork and goes away again, so "right" and
+ * "right, then immediately left" have to be distinguishable in the one look
+ * you get. Beyond this gap it is a separate decision and can wait its turn.
+ */
+const THEN_M = 80
+
+const thenKind = computed(() =>
+  nav.then && nav.then.gapM < THEN_M ? nav.then.kind : null,
+)
 
 function formatDistance(metres: number | null) {
   if (metres == null) return ''
@@ -163,6 +176,13 @@ const standalone =
   matchMedia('(display-mode: standalone)').matches ||
   (navigator as { standalone?: boolean }).standalone === true
 
+// Dismissible: on a device with no magnetometer, or one where the answer has
+// been refused for good, the note is a permanent strip of screen spent saying
+// something that cannot change. Cleared again whenever the status does, so a
+// different problem still gets to speak up.
+const compassDismissed = ref(false)
+watch(compassStatus, () => (compassDismissed.value = false))
+
 const compassProblem = computed(() => {
   if (!usingCompass()) return null
   switch (compassStatus.value) {
@@ -233,25 +253,49 @@ const progress = computed(() => {
         <div class="instruction">
           <span class="distance">{{ maneuverDistance }}</span>
           <span class="turn-text">{{ t(`nav_${kind}`) }}</span>
+          <!-- The second half of a double turn, so one look at the fork is
+               enough and the phone can go back in your pocket. -->
+          <span v-if="thenKind" class="then">
+            <svg class="then-turn" viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="TURN_PATHS[thenKind]" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+              <path v-if="ARROW_HEAD[thenKind]" :d="ARROW_HEAD[thenKind]" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            {{ t('navThen') }} {{ t(`nav_${thenKind}`) }}
+          </span>
         </div>
       </template>
     </div>
 
     <div class="bottom">
     <Transition name="compass">
-      <component
-        :is="compassProblem?.retry ? 'button' : 'p'"
-        v-if="compassProblem"
+      <div
+        v-if="compassProblem && !compassDismissed"
         class="compass-note"
         :class="{ actionable: compassProblem.retry }"
-        @click="compassProblem.retry && retryCompass()"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="compass-icon" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
           <path d="m15 9-2.2 5-4.8 1 2.2-5z" fill="currentColor" />
         </svg>
-        {{ compassProblem.text }}
-      </component>
+        <!-- Only a note worth tapping becomes a button; the rest is text. -->
+        <component
+          :is="compassProblem.retry ? 'button' : 'span'"
+          class="compass-text"
+          @click="compassProblem.retry && retryCompass()"
+        >
+          {{ compassProblem.text }}
+        </component>
+        <button
+          class="compass-dismiss"
+          :aria-label="t('dismiss')"
+          :title="t('dismiss')"
+          @click="compassDismissed = true"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
     </Transition>
 
     <!-- Voice and recenter float above the bar so the figures below can be
@@ -413,6 +457,23 @@ const progress = computed(() => {
   opacity: 0.95;
 }
 
+/* The follow-up turn: present, clearly secondary, readable at arm's length. */
+.then {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 14.5px;
+  font-weight: 600;
+  opacity: 0.82;
+}
+
+.then-turn {
+  flex: none;
+  width: 17px;
+  height: 17px;
+}
+
 .rejoin-dist {
   display: block;
   font-size: 15px;
@@ -530,7 +591,7 @@ const progress = computed(() => {
   color: var(--ink-2);
 }
 
-.compass-note svg {
+.compass-icon {
   flex: none;
   width: 19px;
   height: 19px;
@@ -540,6 +601,31 @@ const progress = computed(() => {
 .compass-note.actionable {
   color: var(--ink);
   border-color: #b45309;
+}
+
+/* Inherits the note's type so a button and a span read identically. */
+.compass-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.compass-dismiss {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px -4px 0;
+  border-radius: 50%;
+  color: var(--ink-3);
+}
+
+.compass-dismiss svg {
+  width: 15px;
+  height: 15px;
 }
 
 .compass-enter-active,

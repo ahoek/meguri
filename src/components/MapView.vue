@@ -27,6 +27,7 @@ import { locale, t } from '../i18n'
 import type { LngLat } from '../domain/geo'
 import type { Route } from '../domain/route'
 import type { Projection } from '../app/nav-session'
+import type { Framing } from '../map/follow'
 
 const container = ref<HTMLElement | null>(null)
 let map: maplibregl.Map
@@ -40,16 +41,54 @@ let markers: ReturnType<typeof createMarkers>
 let puck: ReturnType<typeof createPuck>
 let camera: ReturnType<typeof createFollowCamera>
 
-// Walking needs to see the next side street; cycling covers ground faster
-// and wants a little more look-ahead.
-const NAV_ZOOM = { walk: 20.4, bike: 20 }
+// Walking needs to see the next side street, and the junction after it: at 20.4
+// a phone showed about thirty metres of world, which is a decision you have
+// already made by the time it is on screen.
+const NAV_ZOOM = { walk: 19.2, bike: 20 }
+
+// Two moments deserve a wider, flatter view than plain travelling does.
+//
+// A junction is the one moment a walker actually looks at the screen, and what
+// they need then is the shape of the fork rather than the tarmac underfoot. Off
+// the route, what they need is to see the route. Both are the same move: stand
+// up straighter and take a step back.
+const TRAVEL_PITCH = 55
+const JUNCTION = { out: 0.9, pitch: 34 }
+const OFF_ROUTE = { out: 2.4, pitch: 15 }
+// How close a turn has to be before the map opens up for it.
+const JUNCTION_M = 70
+
+// A pinch says the rider wants their own zoom. Keep deciding tilt and padding,
+// but stop imposing a zoom on them until Recenter asks for one.
+let zoomHeld = false
+
+function navFraming(): Framing {
+  const base = NAV_ZOOM[store.mode] ?? 18
+  const shift = nav.offRoute ? OFF_ROUTE : atJunction() ? JUNCTION : null
+  return {
+    zoom: zoomHeld ? map.getZoom() : base - (shift?.out ?? 0),
+    pitch: shift?.pitch ?? TRAVEL_PITCH,
+    padding: navPadding(),
+  }
+}
+
+function atJunction() {
+  return !nav.offRoute && nav.maneuver != null && nav.maneuver.distanceM < JUNCTION_M
+}
+
+/** Re-assert whatever framing the moment calls for, if the camera is ours. */
+function applyFraming() {
+  if (!nav.active || !camera?.isFollowing()) return
+  camera.setFraming(navFraming())
+}
 
 defineExpose({
   recenter() {
     // Glide back from wherever the user panned to: seed the eased camera
     // with the current view and let the follow loop close the gap.
     camera.seedFromView()
-    camera.setFraming({ zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() })
+    zoomHeld = false // asking to be recentred is asking for our zoom back
+    camera.setFraming(navFraming())
     camera.start()
   },
 })
@@ -115,13 +154,26 @@ function drawRoute(route: Route) {
  * nearest-point search over the whole path could match a later stretch that
  * happens to pass close by, and lop off everything before it — which is how
  * the line came up short.
+ *
+ * What is left is the gap between the rider and the head of that path, because
+ * the path starts wherever they were when it was computed. An orange line
+ * hanging in the street nearby, attached to nothing, is worse than no line: it
+ * doesn't say "start here". So the gap gets a dotted leader — visibly not a
+ * road, visibly joined to you.
  */
 let rejoinTrimmed = 0
 const ON_REJOIN_M = 25 // beyond this you are not on the path, you are near it
+const LEADER_M = 8 // closer than this and there is no gap worth drawing
+// And past this the path is not near you at all — it is stale, computed before
+// you wandered this far, and a fresh one is on its way. A dotted line reaching
+// two hundred metres over the rooftops to reach it is the straight bridge this
+// whole approach exists to avoid.
+const LEADER_MAX_M = 60
 
 function drawRejoin() {
   if (!nav.rejoin || !nav.offRoute) {
     layers.setRejoin(null)
+    layers.setRejoinLeader(null)
     return
   }
 
@@ -129,6 +181,7 @@ function drawRejoin() {
   const from = nav.position
   if (!from || path.length < 2) {
     layers.setRejoin(path)
+    layers.setRejoinLeader(null)
     return
   }
 
@@ -147,7 +200,13 @@ function drawRejoin() {
   if (best * 1000 <= ON_REJOIN_M) {
     rejoinTrimmed = Math.min(nearest, path.length - 2)
   }
-  layers.setRejoin(path.slice(rejoinTrimmed))
+  const remaining = path.slice(rejoinTrimmed)
+  layers.setRejoin(remaining)
+
+  const head = remaining[0]
+  const gapM = distanceKm(from, head) * 1000
+  const worthJoining = gapM > LEADER_M && gapM <= LEADER_MAX_M
+  layers.setRejoinLeader(worthJoining ? [from, head] : null)
 }
 
 let traveledPaintedAt = 0
@@ -156,7 +215,7 @@ let traveledPaintedAt = 0
  * Grey out the route behind the rider. Follows the interpolated position so
  * the boundary sits under the arrow rather than trailing a fix behind it.
  */
-function paintTraveled(position: LngLat, index: number) {
+function paintTraveled(tip: LngLat, index: number) {
   const prepared = preparedRoute()
   if (!prepared) return
 
@@ -167,18 +226,20 @@ function paintTraveled(position: LngLat, index: number) {
 
   // Off the route the rider is somewhere else entirely; the trail still marks
   // how far along the route they got, so it ends at the projection.
-  const tip = nav.offRoute ? nav.snapped : position
-  if (!tip) return
+  const end = nav.offRoute ? nav.snapped : tip
+  if (!end) return
   const at = nav.offRoute ? currentIndex() : (index ?? currentIndex())
-  layers.setTraveled(traveledLine(prepared, at, tip))
+  layers.setTraveled(traveledLine(prepared, at, end))
 }
 
 /** Everything the camera loop should draw at the eased position. */
 function onFollowFrame(here: LngLat, projected: Projection) {
   puck.update(here, projected.bearing)
   if (nav.offRoute) drawRejoin()
-  // The grey trail ends where the arrow is, not where the last fix was.
-  paintTraveled(here, projected.index)
+  // The grey trail ends where the arrow is, not where the last fix was — but
+  // on the line, so it doesn't kink out to the pavement the arrow stands on.
+  const [dLng, dLat] = projected.offset
+  paintTraveled([here[0] - dLng, here[1] - dLat], projected.index)
 }
 
 function enterNavigation() {
@@ -190,7 +251,8 @@ function enterNavigation() {
   // Start the camera from wherever the planner left it and let the loop glide
   // in — zoom, tilt, padding and centre all travelling together.
   camera.seedFromView()
-  camera.setFraming({ zoom: NAV_ZOOM[store.mode] ?? 18, pitch: 55, padding: navPadding() })
+  zoomHeld = false
+  camera.setFraming(navFraming())
   camera.start()
 }
 
@@ -259,7 +321,8 @@ onMounted(() => {
   resizeObserver.observe(container.value!)
 
   map.on('load', () => {
-    styleTweaks.removeExtrusions()
+    styleTweaks.softenExtrusions()
+    styleTweaks.clarifyWays()
     layers.add(store.mode, routeLat())
 
     // A restored session is already in the store before the style finishes
@@ -283,9 +346,12 @@ onMounted(() => {
   })
 
   // A pinch means you want a different zoom than the one we chose, but you
-  // are still following.
+  // are still following. Remembered, so the next junction re-tilts the map
+  // without dragging the zoom back off you.
   map.on('zoomstart', (e) => {
-    if (nav.active && e.originalEvent) camera.setFraming(null)
+    if (!nav.active || !e.originalEvent) return
+    zoomHeld = true
+    camera.setFraming(null)
   })
 
   // Freeze camera writes while fingers are down so MapLibre's touch handlers
@@ -381,7 +447,22 @@ onMounted(() => {
       active ? enterNavigation() : exitNavigation()
     },
   )
+
+  // Open the view up as a junction arrives and again when the route is lost,
+  // and close it back down afterwards. Watched as booleans rather than as the
+  // distance itself, so this fires on crossing the threshold instead of on
+  // every fix.
+  watch([atJunction, () => nav.offRoute, () => store.mode], applyFraming)
+
+  // Coming back to the screen — out of a pocket, off the lock screen — is the
+  // moment the walker is asking a question. Re-assert the framing then: if the
+  // tilt never arrived because the first fix was slow, this is where it lands.
+  document.addEventListener('visibilitychange', onVisible)
 })
+
+function onVisible() {
+  if (document.visibilityState === 'visible') applyFraming()
+}
 
 if (import.meta.env.DEV) {
   // Lets simulated-navigation checks inspect layers and filters.
@@ -391,6 +472,7 @@ if (import.meta.env.DEV) {
 }
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisible)
   camera?.stop()
   puck?.remove()
   cancelAnimationFrame(drawFrame)

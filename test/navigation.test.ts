@@ -7,6 +7,7 @@ import {
   locateInitial,
   locateOnRoute,
   nextManeuver,
+  maneuverAfter,
 } from '../src/domain/navigation'
 import { ORIGIN, offset, metresBetween, routeFrom, squareLoop } from './helpers'
 
@@ -141,5 +142,21 @@ describe('maneuvers', () => {
     const p = withHints([[2, 2, 0, 0, 90]])
     const justPast = p.maneuvers[0].atKm + 0.002
     expect(nextManeuver(p, justPast)?.distanceM ?? 0).toBeGreaterThanOrEqual(0)
+  })
+
+  // A walker reads the screen at the fork and puts the phone away, so a turn
+  // that lands right behind the next one has to travel with it.
+  it('reports the turn after the next one, and the gap to it', () => {
+    const p = withHints([[1, 2, 0, 0, 90], [3, 5, 0, 0, 90]])
+    const first = nextManeuver(p, 0)!
+    const second = maneuverAfter(p, first.atKm)!
+
+    expect(second.kind).toBe('right')
+    expect(second.gapM).toBeCloseTo((p.maneuvers[1].atKm - first.atKm) * 1000, 3)
+  })
+
+  it('has nothing to add after the last turn', () => {
+    const p = withHints([[2, 2, 0, 0, 90]])
+    expect(maneuverAfter(p, p.maneuvers[0].atKm)).toBeNull()
   })
 })

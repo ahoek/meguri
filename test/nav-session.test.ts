@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { positionAtKm, prepareRoute } from '../src/domain/navigation'
+import { locateOnRoute, positionAtKm, prepareRoute } from '../src/domain/navigation'
 import { squareLoop, ORIGIN, offset } from './helpers'
 import type { LngLat } from '../src/domain/geo'
 import type { PreparedRoute } from '../src/domain/navigation'
@@ -40,14 +40,17 @@ function installGeolocation() {
 }
 
 /** Deliver a fix, advancing the clock by `afterSec`. */
-function fix(position: LngLat, { speed = null as number | null, afterSec = 3 } = {}) {
+function fix(
+  position: LngLat,
+  { speed = null as number | null, afterSec = 3, accuracy = 8 } = {},
+) {
   clock += afterSec * 1000
   listener?.({
     timestamp: clock,
     coords: {
       longitude: position[0],
       latitude: position[1],
-      accuracy: 8,
+      accuracy,
       heading: null,
       speed,
     },
@@ -57,6 +60,7 @@ function fix(position: LngLat, { speed = null as number | null, afterSec = 3 } =
 let nav: NavModule['nav']
 let startNavigation: NavModule['startNavigation']
 let stopNavigation: NavModule['stopNavigation']
+let projectedPosition: NavModule['projectedPosition']
 
 beforeEach(async () => {
   installGeolocation()
@@ -68,6 +72,7 @@ beforeEach(async () => {
   nav = mod.nav
   startNavigation = mod.startNavigation
   stopNavigation = mod.stopNavigation
+  projectedPosition = mod.projectedPosition
 })
 
 afterEach(() => {
@@ -217,6 +222,65 @@ describe('implausible fixes', () => {
 
     expect(nav.alongKm).toBeGreaterThan(0.25)
     expect(nav.alongKm).toBeLessThan(p.totalKm * 0.5)
+  })
+})
+
+/**
+ * The route is a centreline; you are not on it. Snapping hard to it put the
+ * arrow out among the cars while the walker was on the right-hand pavement,
+ * which reads as the app not knowing where you are.
+ */
+describe('which side of the road', () => {
+  /**
+   * How far the drawn position sits from the centreline, in metres.
+   *
+   * `locateOnRoute` rather than `locateInitial`: the latter prefers the
+   * earliest of several near-equal candidates, which on a loop this small
+   * means it never leaves the first segment.
+   */
+  const strayM = (p: PreparedRoute) =>
+    locateOnRoute(p, projectedPosition()!.position, 0).offRouteM
+
+  it('shows you beside the line, not on it', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+    rideTo(p, 0.15)
+
+    // Seven metres to the side: a cycle path beside the road, not a wrong turn.
+    const online = positionAtKm(p, nav.alongKm + 0.02).position
+    for (let i = 0; i < 3; i++) fix(offset(online, 7, 0), { speed: 4 })
+
+    expect(nav.offRoute).toBe(false)
+    expect(strayM(p)).toBeGreaterThan(4)
+  })
+
+  it('will not be dragged further than a road is wide', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+    rideTo(p, 0.15)
+
+    // A 40 m sideways reading is a bad fix or the next street over. Believing
+    // it wholesale would draw the rider through the houses in between.
+    const online = positionAtKm(p, nav.alongKm + 0.02).position
+    for (let i = 0; i < 4; i++) fix(offset(online, 40, 0), { speed: 4 })
+
+    expect(strayM(p)).toBeLessThan(25)
+  })
+
+  it('ignores the sideways part of a vague fix', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+    rideTo(p, 0.15)
+
+    // Accurate to within 80 m: this cannot tell one kerb from the other, so
+    // following it sideways would only add wobble.
+    const online = positionAtKm(p, nav.alongKm + 0.02).position
+    for (let i = 0; i < 4; i++) fix(offset(online, 15, 0), { speed: 4, accuracy: 80 })
+
+    expect(strayM(p)).toBeLessThan(2)
   })
 })
 

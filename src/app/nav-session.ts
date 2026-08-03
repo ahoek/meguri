@@ -4,6 +4,7 @@ import {
   locateOnRoute,
   locateInitial,
   nextManeuver,
+  maneuverAfter,
   routeBearingAt,
   positionAtKm,
   segmentBearingAt,
@@ -37,6 +38,7 @@ interface NavState {
   stationary: boolean
   fixAt: number
   maneuver: (Maneuver & { distanceM: number }) | null
+  then: (Maneuver & { gapM: number }) | null
   offRoute: boolean
   arrived: boolean
   voice: boolean
@@ -91,6 +93,7 @@ export const nav = reactive<NavState>({
   stationary: true, // the device says you are not moving — never extrapolate
   fixAt: 0, // performance.now() of the last accepted fix
   maneuver: null, // { kind, distanceM, exit }
+  then: null, // the manoeuvre after that one, when it lands close behind it
   offRoute: false,
   arrived: false,
   // Off unless the rider turned it on before: speaking up uninvited is worse
@@ -188,6 +191,57 @@ function updatePace(gpsSpeed: number | null, advancedKm: number, dtSec: number) 
   }
 }
 
+/**
+ * How much of the sideways gap between the road's centreline and the GPS to
+ * keep.
+ *
+ * Snapping hard to the line is a lie you can see out of the corner of your
+ * eye: you walk the right-hand pavement and the arrow sits out among the cars.
+ * The route decides how far along you are — that has to stay smooth, or the
+ * distance to the turn jitters — but which side of it you are on is something
+ * the GPS actually knows, so keep that part of the reading.
+ */
+const OFFSET_SMOOTHING = 0.5
+// Beyond this the "offset" is not a pavement, it is a bad fix or a parallel
+// street, and drawing it would say we know something we don't.
+const MAX_OFFSET_M = 20
+// A fix this vague cannot tell one side of a road from the other; following it
+// would only add wobble.
+const OFFSET_ACCURACY_M = 30
+const M_PER_DEG_LAT = 111_320
+
+let offsetLng = 0
+let offsetLat = 0
+
+function updateLateralOffset(
+  position: LngLat,
+  snapped: LngLat,
+  accuracy: number | null,
+) {
+  let dLng = 0
+  let dLat = 0
+
+  if (accuracy == null || accuracy <= OFFSET_ACCURACY_M) {
+    dLng = position[0] - snapped[0]
+    dLat = position[1] - snapped[1]
+    // Cap in metres rather than degrees: a degree of longitude is two thirds
+    // of a degree of latitude at these latitudes and shrinks further north.
+    const perDegLng = M_PER_DEG_LAT * Math.cos((position[1] * Math.PI) / 180)
+    const east = dLng * perDegLng
+    const north = dLat * M_PER_DEG_LAT
+    const away = Math.hypot(east, north)
+    if (away > MAX_OFFSET_M) {
+      const keep = MAX_OFFSET_M / away
+      dLng *= keep
+      dLat *= keep
+    }
+  }
+
+  // Eased, so a single noisy fix nudges the arrow rather than shoving it.
+  offsetLng += (dLng - offsetLng) * OFFSET_SMOOTHING
+  offsetLat += (dLat - offsetLat) * OFFSET_SMOOTHING
+}
+
 // Give up doubting after this many fixes in a row: if the GPS keeps insisting,
 // it is right and our idea of where we are is stale.
 const MAX_DOUBTS = 3
@@ -247,6 +301,7 @@ function onPosition(pos: GeolocationPosition) {
     alongKm = fix.alongKm
     maxAlongKm = Math.max(maxAlongKm, alongKm)
     nav.snapped = fix.snapped
+    updateLateralOffset(position, fix.snapped, accuracy)
     lastAcceptedAt = now
     doubts = 0
   } else {
@@ -292,6 +347,7 @@ function onPosition(pos: GeolocationPosition) {
 
   const maneuver = nav.offRoute ? null : nextManeuver(prepared!, alongKm)
   nav.maneuver = maneuver
+  nav.then = maneuver ? maneuverAfter(prepared!, maneuver.atKm) : null
 
   // The finish is also the start, so arriving requires having gone round —
   // and going round requires having left in the first place.
@@ -313,7 +369,10 @@ function onPosition(pos: GeolocationPosition) {
   }
 }
 
-const REJOIN_REFRESH_M = 45 // recompute once you've wandered this much further
+// Recompute once you've wandered this much further. Kept short enough that the
+// head of the path stays within a step or two of you: past that the drawn path
+// starts somewhere you are not, which is what the dotted leader has to cover.
+const REJOIN_REFRESH_M = 30
 
 /**
  * Route from where you actually are back to the loop. The loop itself is never
@@ -379,6 +438,8 @@ export function startNavigation(
   awayFixes = 0
   leftStart = false
   haveFirstFix = false
+  offsetLng = 0
+  offsetLat = 0
   resetSpeech()
 
   rejoinFrom = null
@@ -398,6 +459,7 @@ export function startNavigation(
     remainingKm: prepared.totalKm,
     remainingSec: (prepared.totalKm / movingPaceKmh) * 3600,
     maneuver: null,
+    then: null,
     offRoute: false,
     arrived: false,
   })
@@ -424,6 +486,7 @@ export function stopNavigation() {
   prepared = null
   nav.active = false
   nav.maneuver = null
+  nav.then = null
   nav.position = null
   nav.snapped = null
   nav.rejoin = null
@@ -481,6 +544,12 @@ export interface Projection {
   index: number
   bearing: number | null
   cameraBearing: number | null
+  /**
+   * The sideways shift already applied to `position`, in degrees. Anything
+   * that has to sit *on* the route — the grey trail behind you — takes it back
+   * out rather than inheriting the wobble.
+   */
+  offset: [number, number]
 }
 
 /**
@@ -505,7 +574,13 @@ export function projectedPosition(): Projection | null {
     const raw = nav.offRoute ? nav.position : (nav.snapped ?? nav.position)
     const heading = device ?? nav.heading
     return raw
-      ? { position: raw, index: lastIndex, bearing: heading, cameraBearing: heading }
+      ? {
+          position: raw,
+          index: lastIndex,
+          bearing: heading,
+          cameraBearing: heading,
+          offset: [0, 0],
+        }
       : null
   }
 
@@ -518,12 +593,17 @@ export function projectedPosition(): Projection | null {
   const km = nav.alongKm + ahead
   const { position, index } = positionAtKm(prepared, km)
   return {
-    position,
+    // Along the route from the projection, sideways from the GPS: the two
+    // things each source is actually good at.
+    position: [position[0] + offsetLng, position[1] + offsetLat],
     index,
-    // The arrow shows the road you are on, measured from where you stand.
+    // The arrow shows the road you are on, measured from where you stand on
+    // the line rather than from the offset point beside it: which road that is
+    // remains the route's business, and a metre sideways must not tilt it.
     bearing: device ?? segmentBearingAt(prepared, index, position),
     // The camera aims further ahead so it turns smoothly instead of snapping.
     cameraBearing: device ?? bearingAlong(prepared, km),
+    offset: [offsetLng, offsetLat],
   }
 }
 
@@ -539,5 +619,13 @@ export function currentIndex() {
 // Navigation can't be exercised without physically moving, so in dev expose
 // the live session for simulated GPS traces. Stripped from production builds.
 if (import.meta.env.DEV) {
-  ;(window as any).__navSession = { nav, preparedRoute, currentIndex }
+  // `projectedPosition` among them: where the arrow is drawn is a conclusion
+  // drawn from several fixes, and reading it back off a pitched marker's DOM
+  // box turns a metre sideways into thirty.
+  ;(window as any).__navSession = {
+    nav,
+    preparedRoute,
+    currentIndex,
+    projectedPosition,
+  }
 }

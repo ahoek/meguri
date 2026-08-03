@@ -64,40 +64,46 @@ export function createFollowCamera(map: maplibregl.Map, opts: Options) {
     if (!opts.active()) return
 
     const projected = opts.project()
-    if (!projected) return
 
-    if (!shown.valid) {
-      shown.lng = projected.position[0]
-      shown.lat = projected.position[1]
-      shown.valid = true
+    if (projected) {
+      if (!shown.valid) {
+        shown.lng = projected.position[0]
+        shown.lat = projected.position[1]
+        shown.valid = true
+      }
+      const ease = opts.positionEase()
+      shown.lng += (projected.position[0] - shown.lng) * ease
+      shown.lat += (projected.position[1] - shown.lat) * ease
+      opts.onFrame([shown.lng, shown.lat], projected)
     }
-    const ease = opts.positionEase()
-    shown.lng += (projected.position[0] - shown.lng) * ease
-    shown.lat += (projected.position[1] - shown.lat) * ease
-    const here: LngLat = [shown.lng, shown.lat]
-
-    opts.onFrame(here, projected)
 
     if (!following || touched) return
 
-    if (!cam.valid) {
-      cam.lng = here[0]
-      cam.lat = here[1]
-      cam.bearing = projected.cameraBearing ?? map.getBearing()
-      cam.valid = true
-    }
-    if (projected.cameraBearing != null) {
-      const turnEase = opts.fromCompass() ? COMPASS_BEARING_EASE : BEARING_EASE
-      cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * turnEase
-    }
-    cam.lng += (here[0] - cam.lng) * CENTER_EASE
-    cam.lat += (here[1] - cam.lat) * CENTER_EASE
+    // Zoom, tilt and padding are settled whether or not we know where we are.
+    // Tying them to a position meant a slow first fix left the map flat and
+    // north-up for as long as the GPS took — and if the rider panned in the
+    // meantime the tilt never arrived at all.
+    const move: maplibregl.JumpToOptions = {}
 
-    // Track the same eased point the arrow uses (with a whisker of lag), so it
-    // holds still on screen and the world moves under it.
-    const move: maplibregl.JumpToOptions = {
-      center: [cam.lng, cam.lat],
-      bearing: cam.bearing,
+    if (projected) {
+      const here: LngLat = [shown.lng, shown.lat]
+      if (!cam.valid) {
+        cam.lng = here[0]
+        cam.lat = here[1]
+        cam.bearing = projected.cameraBearing ?? map.getBearing()
+        cam.valid = true
+      }
+      if (projected.cameraBearing != null) {
+        const turnEase = opts.fromCompass() ? COMPASS_BEARING_EASE : BEARING_EASE
+        cam.bearing += shortestTurn(cam.bearing, projected.cameraBearing) * turnEase
+      }
+      cam.lng += (here[0] - cam.lng) * CENTER_EASE
+      cam.lat += (here[1] - cam.lat) * CENTER_EASE
+
+      // Track the same eased point the arrow uses (with a whisker of lag), so
+      // it holds still on screen and the world moves under it.
+      move.center = [cam.lng, cam.lat]
+      move.bearing = cam.bearing
     }
 
     if (framing) {
@@ -124,7 +130,9 @@ export function createFollowCamera(map: maplibregl.Map, opts: Options) {
       }
     }
 
-    map.jumpTo(move)
+    // Nothing to say yet: no fix and nothing left to settle. Writing the
+    // camera anyway would cancel whatever animation the planner left running.
+    if (move.center || move.zoom != null) map.jumpTo(move)
   }
 
   return {
@@ -151,6 +159,9 @@ export function createFollowCamera(map: maplibregl.Map, opts: Options) {
       cam.bearing = map.getBearing()
       cam.valid = true
       following = true
+      // A touchend that landed somewhere other than the canvas would leave
+      // this stuck on, and a held camera never tilts or turns.
+      touched = false
     },
 
     setFraming(next: Framing | null) {

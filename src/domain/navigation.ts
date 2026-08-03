@@ -374,6 +374,22 @@ export function nextManeuver(
   }
 }
 
+/**
+ * The manoeuvre following the one at `atKm`, and the gap between the two.
+ *
+ * "Right, then immediately left" is a different instruction from "right", and
+ * a walker who reads the screen at the fork and puts the phone away has no
+ * second chance to find that out. So the pair travels together.
+ */
+export function maneuverAfter(
+  prepared: PreparedRoute,
+  atKm: number,
+): (Maneuver & { gapM: number }) | null {
+  const following = prepared.maneuvers.find((m) => m.atKm > atKm + 0.001)
+  if (!following) return null
+  return { ...following, gapM: Math.max(0, (following.atKm - atKm) * 1000) }
+}
+
 /** Slice the route ahead of the current position, for drawing. */
 export function remainingLine(
   prepared: PreparedRoute,
