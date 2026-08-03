@@ -323,6 +323,11 @@ onMounted(() => {
   map.on('load', () => {
     styleTweaks.softenExtrusions()
     styleTweaks.clarifyWays()
+    styleTweaks.favourNature()
+    styleTweaks.liftWalkPois()
+    // Not a navigation decision: the street furniture goes for good, and this
+    // is the call that installs the filter doing it.
+    styleTweaks.setCarPoisHidden(nav.active)
     layers.add(store.mode, routeLat())
 
     // A restored session is already in the store before the style finishes
