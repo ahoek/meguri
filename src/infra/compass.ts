@@ -28,10 +28,24 @@ export const compassStatus = ref<CompassStatus>('off')
 // times a second to say "the phone moved a degree" helps nobody.
 let heading: number | null = null
 let listening = false
+// A demo sitting on a desk has a real magnetometer pointing at a real north,
+// which has nothing to do with the route it is pretending to walk. When one is
+// installed it answers instead of the sensor.
+let pretend: (() => number) | null = null
 
 /** Degrees clockwise from true north, or null if we have no reading. */
 export function compassHeading(): number | null {
-  return heading
+  return pretend ? pretend() : heading
+}
+
+/**
+ * Answer with this instead of the sensor, and report the compass as working.
+ * Pass null to hand the compass back to the hardware.
+ */
+export function simulateCompass(source: (() => number) | null) {
+  pretend = source
+  if (source) compassStatus.value = 'live'
+  else if (!listening) compassStatus.value = 'off'
 }
 
 type CompassEvent = DeviceOrientationEvent & { webkitCompassHeading?: number }

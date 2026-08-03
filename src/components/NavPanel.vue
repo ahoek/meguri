@@ -8,6 +8,10 @@ import {
   compassStatus,
   retryCompass,
   usingCompass,
+  setDemoSpeed,
+  toggleDemoPaused,
+  toggleDemoStraying,
+  DEMO_SPEEDS,
 } from '../app/nav-session'
 import { primeSpeech, chooseVoice } from '../app/guidance'
 import { allVoices, voiceChoice } from '../infra/speech'
@@ -239,8 +243,55 @@ const progress = computed(() => {
     ref="navEl"
     class="nav"
     :class="{ arrived: nav.arrived }"
-    :style="{ '--dash-inset': dashInset + 'px' }"
+    :style="{
+      '--dash-inset': dashInset + 'px',
+      '--banner-inset': store.bannerInset + 'px',
+    }"
   >
+    <!-- Demo controls. Under the banner, out of the way of everything the
+         navigation itself owns, and saying plainly that the position is
+         invented — a screen claiming to know where you are when it doesn't is
+         the one thing this must never do quietly. -->
+    <div v-if="nav.demo" class="demo-strip">
+      <span class="demo-badge">{{ t('demoBadge') }}</span>
+      <div class="demo-buttons">
+        <button
+          class="demo-btn"
+          :aria-label="nav.demo.paused ? t('demoResume') : t('demoPause')"
+          :title="nav.demo.paused ? t('demoResume') : t('demoPause')"
+          @click="toggleDemoPaused"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path v-if="nav.demo.paused" d="M8 5.5v13l11-6.5z" fill="currentColor" />
+            <path v-else d="M8.5 5.5v13M15.5 5.5v13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </button>
+        <button
+          v-for="factor in DEMO_SPEEDS"
+          :key="factor"
+          class="demo-btn demo-speed"
+          :class="{ on: nav.demo.speed === factor }"
+          :aria-label="`${t('demoSpeed')} ${factor}×`"
+          :aria-pressed="nav.demo.speed === factor"
+          @click="setDemoSpeed(factor)"
+        >
+          {{ factor }}×
+        </button>
+        <button
+          class="demo-btn demo-stray"
+          :class="{ on: nav.demo.straying }"
+          :aria-label="nav.demo.straying ? t('demoRejoin') : t('demoStray')"
+          :title="nav.demo.straying ? t('demoRejoin') : t('demoStray')"
+          :aria-pressed="nav.demo.straying"
+          @click="toggleDemoStraying"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 21V11a4 4 0 0 1 4-4h4m0 0-3-3m3 3-3 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Instruction banner -->
     <!-- Only colour it as a warning when it is actually warning about
          something; re-acquiring GPS shouldn't come up red. -->
@@ -607,6 +658,71 @@ const progress = computed(() => {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
+}
+
+/* ---- demo controls ----
+   Anchored under the banner, which measures its own height and publishes it. */
+.demo-strip {
+  position: absolute;
+  top: calc(var(--banner-inset, 96px) + 10px);
+  left: calc(12px + env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.demo-badge {
+  padding: 4px 9px;
+  border-radius: 8px;
+  /* The one thing on screen that should look like a stamp rather than a
+     control: it is a statement about what you are looking at. */
+  background: #b45309;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  box-shadow: 0 3px 10px -4px rgba(12, 17, 27, 0.6);
+}
+
+.demo-buttons {
+  display: flex;
+  gap: 5px;
+}
+
+.demo-btn {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(1.6);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 4px 14px -8px rgba(12, 17, 27, 0.5);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.demo-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.demo-btn.on {
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.demo-btn.demo-stray.on {
+  color: #b45309;
+  border-color: #b45309;
 }
 
 /* ---- compass trouble ----

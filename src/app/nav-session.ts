@@ -17,7 +17,10 @@ import {
   stopCompass,
   compassHeading,
   compassStatus,
+  simulateCompass,
 } from '../infra/compass'
+import { startSimulation, simulatedHeading } from '../infra/simulator'
+import type { Simulation } from '../infra/simulator'
 import { routeBetween } from '../infra/brouter'
 import { distanceKm } from '../domain/geo'
 import type { LngLat } from '../domain/geo'
@@ -44,7 +47,14 @@ interface NavState {
   voice: boolean
   rejoin: { coordinates: LngLat[]; distanceKm: number } | null
   rejoining: boolean
+  /** Null on a real ride; the demo's controls when the GPS is being faked. */
+  demo: { speed: number; paused: boolean; straying: boolean } | null
 }
+
+// What the demo offers. 1 is real time, which is the honest one and far too slow
+// to show anybody.
+export const DEMO_SPEEDS = [1, 4, 10]
+const DEMO_DEFAULT_SPEED = 4
 
 const ARRIVE_M = 25
 
@@ -101,6 +111,7 @@ export const nav = reactive<NavState>({
   voice: localStorage.getItem('meguri-voice') === 'on',
   rejoin: null, // { coordinates, distanceKm } path back after a wrong turn
   rejoining: false,
+  demo: null,
 })
 
 let prepared: PreparedRoute | null = null
@@ -124,6 +135,19 @@ let rejoinAbort: AbortController | null = null
 let rejoinFrom: LngLat | null = null
 let profileMode: Profile = 'walk'
 let natureOn = true
+let simulation: Simulation | null = null
+
+/**
+ * Nothing plausible happens faster than this.
+ *
+ * Except in a demo, where the whole point is that it does: a five-kilometre
+ * loop at walking pace is not something you can show anybody. Scaling the
+ * ceiling keeps the guard doing its job proportionally — a sped-up walk gets
+ * through, a jump to the far side of the loop still doesn't.
+ */
+function speedCeiling() {
+  return MAX_SPEED_KMH[profileMode] * (nav.demo?.speed ?? 1)
+}
 
 export function setVoice(on: boolean) {
   nav.voice = on
@@ -164,7 +188,7 @@ function onVisibility() {
  * display gliding forward at riding speed while the rider stood still.
  */
 function updatePace(gpsSpeed: number | null, advancedKm: number, dtSec: number) {
-  const ceiling = MAX_SPEED_KMH[profileMode]
+  const ceiling = speedCeiling()
   let sample: number | null = null
 
   if (typeof gpsSpeed === 'number' && !Number.isNaN(gpsSpeed) && gpsSpeed >= 0) {
@@ -261,7 +285,7 @@ function plausible(candidateKm: number, nowMs: number) {
   if (!haveFirstFix) return true
   if (doubts >= MAX_DOUBTS) return true
 
-  const ceiling = MAX_SPEED_KMH[profileMode]
+  const ceiling = speedCeiling()
   const stuckSec = Math.max((nowMs - lastAcceptedAt) / 1000, 1)
   const allowanceKm = (ceiling / 3600) * stuckSec + 0.03
   const delta = candidateKm - alongKm
@@ -418,10 +442,10 @@ function onPositionError() {
 
 export function startNavigation(
   route: Route | null,
-  { mode = 'walk' as Profile, nature = true } = {},
+  { mode = 'walk' as Profile, nature = true, demo = false } = {},
 ): boolean {
   if (!route) return false
-  if (!('geolocation' in navigator)) return false
+  if (!demo && !('geolocation' in navigator)) return false
 
   profileMode = mode
   natureOn = nature
@@ -462,28 +486,70 @@ export function startNavigation(
     then: null,
     offRoute: false,
     arrived: false,
+    demo: demo
+      ? { speed: DEMO_DEFAULT_SPEED, paused: false, straying: false }
+      : null,
   })
 
-  watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {
-    enableHighAccuracy: true,
-    maximumAge: 1000,
-    timeout: 15000,
-  })
+  if (demo) {
+    simulation = startSimulation({
+      route: prepared,
+      paceKmh: DEFAULT_PACE_KMH[mode] ?? DEFAULT_PACE_KMH.walk,
+      speed: DEMO_DEFAULT_SPEED,
+      onFix: onPosition,
+    })
+    // A phone on a desk has a real magnetometer pointing at a real north, which
+    // has nothing to do with the route it is pretending to walk. Left to the
+    // hardware, every walking demo would be a demo of a wrong arrow.
+    simulateCompass(() => simulatedHeading(prepared!, alongKm))
+  } else {
+    watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {
+      enableHighAccuracy: true,
+      maximumAge: 1000,
+      timeout: 15000,
+    })
+    // Must be asked for inside the tap that got us here, or iOS refuses.
+    if (mode === 'walk') startCompass()
+  }
+
   acquireWakeLock()
-  // Must be asked for inside the tap that got us here, or iOS refuses.
-  if (mode === 'walk') startCompass()
   document.addEventListener('visibilitychange', onVisibility)
   return true
+}
+
+/** How fast the demo walks the route. Real time is 1. */
+export function setDemoSpeed(factor: number) {
+  if (!nav.demo) return
+  nav.demo.speed = factor
+  simulation?.setSpeed(factor)
+}
+
+/** Stand still, to talk over the screen without the map running away. */
+export function toggleDemoPaused() {
+  if (!nav.demo) return
+  nav.demo.paused = !nav.demo.paused
+  simulation?.setPaused(nav.demo.paused)
+}
+
+/** Take a wrong turn on purpose, and later find the way back. */
+export function toggleDemoStraying() {
+  if (!nav.demo) return
+  nav.demo.straying = !nav.demo.straying
+  simulation?.setStraying(nav.demo.straying)
 }
 
 export function stopNavigation() {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   watchId = null
+  simulation?.stop()
+  simulation = null
+  simulateCompass(null)
   document.removeEventListener('visibilitychange', onVisibility)
   releaseWakeLock()
   stopCompass()
   resetSpeech()
   prepared = null
+  nav.demo = null
   nav.active = false
   nav.maneuver = null
   nav.then = null

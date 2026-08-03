@@ -165,7 +165,10 @@ watch(
   () => nav.active,
   (active) => {
     try {
-      if (active) localStorage.setItem(NAV_KEY, '1')
+      // A demo is not a session to come back to. Resuming one would hand a
+      // screen full of pretended progress to the real GPS and let it carry on
+      // as though the walk had happened.
+      if (active && !nav.demo) localStorage.setItem(NAV_KEY, '1')
       else localStorage.removeItem(NAV_KEY)
     } catch {
       /* ignore */

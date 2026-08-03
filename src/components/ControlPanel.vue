@@ -109,12 +109,13 @@ const targetHint = computed(() => {
     : `≈ ${duration} ${mode}`
 })
 
-function onStartNavigation() {
+function onStartNavigation(demo = false) {
   // Must happen inside the tap itself for iOS to allow speech later.
   primeSpeech()
   const started = startNavigation(store.route, {
     mode: store.mode,
     nature: store.nature,
+    demo,
   })
   if (!started) showError('errNoGeo')
 }
@@ -204,7 +205,7 @@ const routeStats = computed(() => {
       </button>
       <!-- The sheet collapses as soon as a route lands, so starting must not
            require digging the result card back out. -->
-      <button v-if="collapsed && routeStats" class="mini-start" @click="onStartNavigation">
+      <button v-if="collapsed && routeStats" class="mini-start" @click="onStartNavigation()">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
         </svg>
@@ -439,7 +440,7 @@ const routeStats = computed(() => {
             <span class="stat-label">{{ store.mode === 'bike' ? t('estRideTime') : t('estWalkTime') }}</span>
           </div>
         </div>
-        <button class="nav-cta" @click="onStartNavigation">
+        <button class="nav-cta" @click="onStartNavigation()">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
           </svg>
@@ -459,6 +460,16 @@ const routeStats = computed(() => {
               <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             {{ t('gpx') }}
+          </button>
+          <!-- Walks the loop on its own, so navigation can be shown without
+               going outside. Deliberately plain and next to the real thing
+               rather than hidden behind a gesture — a fake GPS you cannot see
+               you have switched on is worse than no fake GPS. -->
+          <button class="ghost-btn" @click="onStartNavigation(true)">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 5.5v13l11-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            {{ t('demo') }}
           </button>
         </div>
       </div>
