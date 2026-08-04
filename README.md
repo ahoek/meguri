@@ -52,9 +52,10 @@ Routing uses [BRouter](https://brouter.de). Two profiles live in
 `src/profiles/`, derived from its stock `trekking` and `hiking-beta`: they
 enable BRouter's forest, town, noise and traffic estimates, add turn
 instructions to the walking profile (the stock one emits none), and put a
-heavy penalty on sand, mud and other loose surfaces so the nature preference
-can't route a bike across a beach. They are registered with BRouter at runtime
-and cached; bump `PROFILE_VERSION` in `src/infra/brouter.ts` when a `.brf` changes.
+heavy penalty on loose surfaces for the bike, so the nature preference can't
+route it across a beach. The walking profile only avoids mud — sand is what a
+walk in the dunes is made of. They are registered with BRouter at runtime and
+cached; bump `PROFILE_VERSION` in `src/infra/brouter.ts` when a `.brf` changes.
 
 | Service | Used for |
 | --- | --- |
@@ -121,8 +122,8 @@ wrong turn, taking the direction of the road rather than an average across a
 corner, and re-indexing turn instructions when spurs are trimmed. The demo's
 simulated receiver is pinned down too: that it scatters, drifts, strays far
 enough to be called a wrong turn, and covers the same ground between fixes
-however fast it is told to run. Most of
-these exist because that exact case went wrong on a real ride.
+however fast it is told to run. Most of these exist because that exact case
+went wrong on a real ride.
 
 ### Deployment
 

@@ -241,37 +241,76 @@ describe('which side of the road', () => {
   const strayM = (p: PreparedRoute) =>
     locateOnRoute(p, projectedPosition()!.position, 0).offRouteM
 
-  it('shows you beside the line, not on it', () => {
-    const { route, prepared: p } = loop()
-    startNavigation(route, { mode: 'bike' })
-    fix(ORIGIN, { speed: 0 })
+  /** Travel to 150 m along, then hold `metres` to one side of the line. */
+  function stepAside(
+    p: PreparedRoute,
+    metres: number,
+    { fixes = 4, accuracy = 8 } = {},
+  ) {
     rideTo(p, 0.15)
-
-    // Seven metres to the side: a cycle path beside the road, not a wrong turn.
     const online = positionAtKm(p, nav.alongKm + 0.02).position
-    for (let i = 0; i < 3; i++) fix(offset(online, 7, 0), { speed: 4 })
+    for (let i = 0; i < fixes; i++) {
+      fix(offset(online, metres, 0), { speed: 4, accuracy })
+    }
+  }
+
+  it('shows a walker beside the line, not on it', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'walk' })
+    fix(ORIGIN, { speed: 0 })
+
+    // Seven metres to the side: the right-hand pavement, not a wrong turn.
+    stepAside(p, 7, { fixes: 3 })
 
     expect(nav.offRoute).toBe(false)
     expect(strayM(p)).toBeGreaterThan(4)
   })
 
-  it('will not be dragged further than a road is wide', () => {
+  /**
+   * On a bike the line is what you steer by, so ordinary scatter must not move
+   * the arrow off it — but the GPS is not disbelieved either, only made to
+   * insist first.
+   */
+  it('keeps a rider on the line through ordinary scatter', () => {
     const { route, prepared: p } = loop()
     startNavigation(route, { mode: 'bike' })
     fix(ORIGIN, { speed: 0 })
-    rideTo(p, 0.15)
+
+    // The width of a cycle path plus a few metres of noise.
+    stepAside(p, 7)
+
+    expect(nav.offRoute).toBe(false)
+    expect(strayM(p)).toBeLessThan(2)
+  })
+
+  it('moves a rider off the line once the GPS really insists', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+
+    // Thirty metres is not the width of anything you could be riding on. Still
+    // short of a wrong turn, but worth showing before one is declared.
+    stepAside(p, 30)
+
+    expect(nav.offRoute).toBe(false)
+    expect(strayM(p)).toBeGreaterThan(8)
+  })
+
+  it('will not be dragged further than a road is wide', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'walk' })
+    fix(ORIGIN, { speed: 0 })
 
     // A 40 m sideways reading is a bad fix or the next street over. Believing
-    // it wholesale would draw the rider through the houses in between.
-    const online = positionAtKm(p, nav.alongKm + 0.02).position
-    for (let i = 0; i < 4; i++) fix(offset(online, 40, 0), { speed: 4 })
+    // it wholesale would draw the walker through the houses in between.
+    stepAside(p, 40)
 
     expect(strayM(p)).toBeLessThan(25)
   })
 
   it('ignores the sideways part of a vague fix', () => {
     const { route, prepared: p } = loop()
-    startNavigation(route, { mode: 'bike' })
+    startNavigation(route, { mode: 'walk' })
     fix(ORIGIN, { speed: 0 })
     rideTo(p, 0.15)
 

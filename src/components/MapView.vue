@@ -17,7 +17,7 @@ import {
   reckoning,
   projectedPosition,
 } from '../app/nav-session'
-import { traveledLine } from '../domain/navigation'
+import { traveledLine, locateOnRoute } from '../domain/navigation'
 import { createStyleTweaks } from '../map/style'
 import { createRouteLayers, ll } from '../map/route-layers'
 import { createMarkers } from '../map/markers'
@@ -215,7 +215,18 @@ let traveledPaintedAt = 0
  * Grey out the route behind the rider. Follows the interpolated position so
  * the boundary sits under the arrow rather than trailing a fix behind it.
  */
-function paintTraveled(tip: LngLat, index: number) {
+/**
+ * Grey out the route behind the rider, ending the trail on the line beneath the
+ * arrow.
+ *
+ * The tip is the arrow's *projection* onto the route, not the arrow itself and
+ * not the arrow with its sideways offset arithmetically removed. That was the
+ * first attempt and it left the last segment visibly wandering off the route: the
+ * drawn position is eased, so it carries a blend of the last few offsets, and
+ * subtracting the current one never quite lands back on the line. Projecting
+ * cannot miss — the result is a point on the route by construction.
+ */
+function paintTraveled(drawnAt: LngLat, index: number) {
   const prepared = preparedRoute()
   if (!prepared) return
 
@@ -225,21 +236,27 @@ function paintTraveled(tip: LngLat, index: number) {
   traveledPaintedAt = now
 
   // Off the route the rider is somewhere else entirely; the trail still marks
-  // how far along the route they got, so it ends at the projection.
-  const end = nav.offRoute ? nav.snapped : tip
-  if (!end) return
-  const at = nav.offRoute ? currentIndex() : (index ?? currentIndex())
-  layers.setTraveled(traveledLine(prepared, at, end))
+  // how far along the route they got, so it ends at the last projection.
+  if (nav.offRoute) {
+    if (nav.snapped) layers.setTraveled(traveledLine(prepared, currentIndex(), nav.snapped))
+    return
+  }
+
+  // Searched from where we already are and never allowed to relocate: on a loop
+  // the finish lies on the start, and a trail tip that jumped there would grey
+  // out the whole route.
+  const at = locateOnRoute(prepared, drawnAt, index ?? currentIndex(), {
+    relocate: false,
+  })
+  layers.setTraveled(traveledLine(prepared, at.index, at.snapped))
 }
 
 /** Everything the camera loop should draw at the eased position. */
 function onFollowFrame(here: LngLat, projected: Projection) {
   puck.update(here, projected.bearing)
   if (nav.offRoute) drawRejoin()
-  // The grey trail ends where the arrow is, not where the last fix was — but
-  // on the line, so it doesn't kink out to the pavement the arrow stands on.
-  const [dLng, dLat] = projected.offset
-  paintTraveled([here[0] - dLng, here[1] - dLat], projected.index)
+  // The grey trail ends under the arrow, not where the last fix was.
+  paintTraveled(here, projected.index)
 }
 
 function enterNavigation() {
@@ -322,7 +339,7 @@ onMounted(() => {
 
   map.on('load', () => {
     styleTweaks.softenExtrusions()
-    styleTweaks.clarifyWays()
+    styleTweaks.clarifyWays(store.mode)
     styleTweaks.favourNature()
     styleTweaks.liftWalkPois()
     // Not a navigation decision: the street furniture goes for good, and this
@@ -434,7 +451,12 @@ onMounted(() => {
 
   watch(
     () => store.mode,
-    (mode) => layers.setGradient(mode),
+    (mode) => {
+      layers.setGradient(mode)
+      // What you may not use depends on what you are travelling by: steps and
+      // bridleways matter differently on a bike than on foot.
+      styleTweaks.clarifyWays(mode)
+    },
   )
 
   watch(

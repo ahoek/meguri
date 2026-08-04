@@ -16,7 +16,7 @@ const natureIds: Partial<Record<Profile, string>> = {}
 
 // Bump whenever a .brf changes, so clients stop reusing the id of the
 // profile they registered from the previous version.
-const PROFILE_VERSION = 3
+const PROFILE_VERSION = 4
 
 function cacheKey(mode: Profile) {
   return `meguri-profile-${mode}-v${PROFILE_VERSION}`

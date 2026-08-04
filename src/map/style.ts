@@ -1,4 +1,5 @@
 import type maplibregl from 'maplibre-gl'
+import type { Profile } from '../domain/route'
 
 /**
  * Tweaks to the vendor basemap style: things to hide or drop that fight with
@@ -76,29 +77,51 @@ const WALK_POI_MINZOOM = 14.5
 // so a strong colour stops being information and becomes the background.
 const FOOT_COLOUR = '#ab8b64'
 const CYCLE_COLOUR = '#7295ac'
+// Tarmac underfoot, and the one thing a nature walk is usually trying to avoid.
+// Keyed on an explicit `surface=paved` only: about a third of the paths in a
+// Dutch wood carry no surface tag at all, and treating "untagged" as paved would
+// turn every real forest trail grey — a confident answer where there is none.
+// Cycleways keep their own colour whatever the surface, since nearly all of them
+// are paved and greying them out would say nothing.
+const FOOT_PAVED_COLOUR = '#a8a49b'
 const PATH_LAYERS = ['road_path_pedestrian', 'bridge_path_pedestrian', 'tunnel_path_pedestrian']
 // Residential street edges: the stock casing is barely a shade off the fill,
 // so a street and the space beside it read as one grey area.
 const CASING_LAYERS = ['road_minor_casing', 'road_service_track_casing']
 
 function pathColour(): maplibregl.ExpressionSpecification {
-  return ['match', ['get', 'subclass'], ['cycleway'], CYCLE_COLOUR, FOOT_COLOUR]
+  return [
+    'case',
+    ['==', ['get', 'subclass'], 'cycleway'],
+    CYCLE_COLOUR,
+    ['==', ['get', 'surface'], 'paved'],
+    FOOT_PAVED_COLOUR,
+    FOOT_COLOUR,
+  ]
 }
 
 /**
- * Faded where you may not go, and where you would rather not.
+ * Faded where you may not go, and where you would rather not — which depends on
+ * what you are travelling by, so this is reapplied when the mode changes.
  *
- * The router already refuses private land, but the map still draws it, and an
- * inviting track that turns out to be someone's drive costs you the walk back.
- * Steps get the same treatment more gently — passable, but not with a bike.
+ * The router already refuses private land and ways barred to you, but the map
+ * still draws them, and an inviting track that turns out to be someone's drive
+ * costs you the walk back. Steps and bridleways are a matter of degree instead:
+ * both are walkable, and on a bike one means carrying it and the other means
+ * pushing through churned sand.
  */
-function pathOpacity(): maplibregl.ExpressionSpecification {
+function pathOpacity(mode: Profile): maplibregl.ExpressionSpecification {
+  const barred = mode === 'bike' ? 'bicycle' : 'foot'
   return [
     'case',
     ['match', ['get', 'access'], ['private', 'no'], true, false],
-    0.3,
+    0.28,
+    ['match', ['get', barred], ['no'], true, false],
+    0.28,
     ['==', ['get', 'subclass'], 'steps'],
-    0.72,
+    mode === 'bike' ? 0.4 : 0.72,
+    ['==', ['get', 'subclass'], 'bridleway'],
+    mode === 'bike' ? 0.55 : 0.85,
     1,
   ]
 }
@@ -134,14 +157,14 @@ export function createStyleTweaks(map: maplibregl.Map) {
      * on load and left alone: this is how the map should look everywhere, not
      * something navigation turns on.
      */
-    clarifyWays() {
+    clarifyWays(mode: Profile) {
       for (const id of PATH_LAYERS) {
         if (!map.getLayer(id)) continue
         map.setPaintProperty(id, 'line-color', pathColour())
         // Longer marks with smaller gaps: a dash still says "not a road",
         // but a dotted hairline says nothing at all.
         map.setPaintProperty(id, 'line-dasharray', [2.2, 1.1])
-        map.setPaintProperty(id, 'line-opacity', pathOpacity())
+        map.setPaintProperty(id, 'line-opacity', pathOpacity(mode))
         map.setPaintProperty(id, 'line-width', [
           'interpolate',
           ['exponential', 1.2],

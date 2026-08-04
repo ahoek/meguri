@@ -234,6 +234,23 @@ const MAX_OFFSET_M = 20
 const OFFSET_ACCURACY_M = 30
 const M_PER_DEG_LAT = 111_320
 
+/**
+ * How far the GPS has to insist before the arrow leaves the line.
+ *
+ * On foot, none: which side of the path you are on is the thing worth showing.
+ * On a bike the line is what you are steering by, and an arrow wobbling a couple
+ * of metres beside it reads as the app being unsure rather than as information
+ * — so ordinary scatter is ignored and the arrow stays where you are aiming.
+ *
+ * Ignored, not disbelieved. Past the deadband the excess is still drawn, because
+ * at twenty-five metres the GPS has stopped describing the width of a cycle path
+ * and started telling you that you are on the service road rather than the dual
+ * carriageway — worth seeing before the wrong-turn warning gets around to it.
+ * Subtracting the deadband rather than switching at it means the arrow slides
+ * out as the evidence builds instead of popping.
+ */
+const OFFSET_DEADBAND_M: Record<Profile, number> = { walk: 0, bike: 13 }
+
 let offsetLng = 0
 let offsetLat = 0
 
@@ -248,17 +265,18 @@ function updateLateralOffset(
   if (accuracy == null || accuracy <= OFFSET_ACCURACY_M) {
     dLng = position[0] - snapped[0]
     dLat = position[1] - snapped[1]
-    // Cap in metres rather than degrees: a degree of longitude is two thirds
-    // of a degree of latitude at these latitudes and shrinks further north.
+    // Measured in metres rather than degrees: a degree of longitude is two
+    // thirds of a degree of latitude here, and shrinks further north.
     const perDegLng = M_PER_DEG_LAT * Math.cos((position[1] * Math.PI) / 180)
-    const east = dLng * perDegLng
-    const north = dLat * M_PER_DEG_LAT
-    const away = Math.hypot(east, north)
-    if (away > MAX_OFFSET_M) {
-      const keep = MAX_OFFSET_M / away
-      dLng *= keep
-      dLat *= keep
-    }
+    const away = Math.hypot(dLng * perDegLng, dLat * M_PER_DEG_LAT)
+    const believed = Math.min(
+      Math.max(away - OFFSET_DEADBAND_M[profileMode], 0),
+      MAX_OFFSET_M,
+    )
+    // Rescale the direction we measured to the distance we believe.
+    const keep = away > 0 ? believed / away : 0
+    dLng *= keep
+    dLat *= keep
   }
 
   // Eased, so a single noisy fix nudges the arrow rather than shoving it.
@@ -359,7 +377,12 @@ function onPosition(pos: GeolocationPosition) {
   nav.paceKmh = paceKmh
   nav.fixAt = performance.now()
   nav.remainingKm = Math.max(0, prepared!.totalKm - alongKm)
-  nav.remainingSec = (nav.remainingKm / movingPaceKmh) * 3600
+  // The demo travels at a multiple of a real pace, but the arrival time should
+  // still be the one you would get on the day — otherwise a demo of a two-hour
+  // loop advertises twelve minutes, and the figure being shown off is wrong.
+  // Distance and progress stay sped up, because you really are covering ground.
+  nav.remainingSec =
+    (nav.remainingKm / (movingPaceKmh / (nav.demo?.speed ?? 1))) * 3600
 
   // Point the way the route runs, not the way the GPS thinks you're facing:
   // course over ground is wild at walking pace and jitters on a bike.
@@ -622,12 +645,6 @@ export interface Projection {
   index: number
   bearing: number | null
   cameraBearing: number | null
-  /**
-   * The sideways shift already applied to `position`, in degrees. Anything
-   * that has to sit *on* the route — the grey trail behind you — takes it back
-   * out rather than inheriting the wobble.
-   */
-  offset: [number, number]
 }
 
 /**
@@ -657,7 +674,6 @@ export function projectedPosition(): Projection | null {
           index: lastIndex,
           bearing: heading,
           cameraBearing: heading,
-          offset: [0, 0],
         }
       : null
   }
@@ -681,7 +697,6 @@ export function projectedPosition(): Projection | null {
     bearing: device ?? segmentBearingAt(prepared, index, position),
     // The camera aims further ahead so it turns smoothly instead of snapping.
     cameraBearing: device ?? bearingAlong(prepared, km),
-    offset: [offsetLng, offsetLat],
   }
 }
 
