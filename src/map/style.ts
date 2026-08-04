@@ -50,6 +50,12 @@ const CLUTTER_POI_CLASSES = [
 
 // And the opposite list: on a long walk in the woods these are the map. Water,
 // a toilet, somewhere to sit, a signpost to check yourself against.
+//
+// Not all of them are conveniences. A dog exercise area — where dogs run off the
+// lead — is here because it changes where you would choose to walk, in whichever
+// direction that happens to be: one person is planning a loop around it, another
+// is planning a loop to it. Showing it and saying nothing serves both, which
+// scoring it as something to avoid would not.
 const WALK_POI_CLASSES = [
   'drinking_water',
   'toilets',
@@ -59,6 +65,7 @@ const WALK_POI_CLASSES = [
   'information',
   'attraction',
   'swimming',
+  'dog_park',
 ]
 const POI_LAYERS = ['poi_r1', 'poi_r7', 'poi_r20']
 // Cloned from the style's own top-rank POI layer so the useful few appear while
