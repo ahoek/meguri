@@ -93,7 +93,10 @@ const messages: Record<Locale, Record<string, string>> = {
     nav_uturn: 'make a U-turn',
     nav_roundabout: 'take the roundabout',
     nav_continue: 'continue straight',
-    nav_finish: 'finish',
+    // Not "finish": that is race vocabulary, and reads oddly on a walk in
+    // every one of these languages. Every route here is a round trip, so the
+    // last stretch is the way back to where you set off.
+    nav_finish: 'back to the start',
   },
   nl: {
     walk: 'Wandelen',
@@ -185,7 +188,7 @@ const messages: Record<Locale, Record<string, string>> = {
     nav_uturn: 'keer om',
     nav_roundabout: 'neem de rotonde',
     nav_continue: 'ga rechtdoor',
-    nav_finish: 'finish',
+    nav_finish: 'terug bij de start',
   },
   ja: {
     walk: '徒歩',
@@ -277,7 +280,7 @@ const messages: Record<Locale, Record<string, string>> = {
     nav_uturn: 'Uターンします',
     nav_roundabout: 'ロータリーに入ります',
     nav_continue: '直進します',
-    nav_finish: 'ゴール',
+    nav_finish: 'スタート地点へ',
   },
 }
 
