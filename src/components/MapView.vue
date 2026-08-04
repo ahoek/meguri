@@ -264,6 +264,8 @@ function enterNavigation() {
   layers.showTraveled(true)
   markers.removeStart()
   markers.clearWaypoints()
+  // The start pin goes with the planner, so the loop's own ends take over.
+  layers.setTermini(store.route?.geometry.coordinates ?? null)
 
   // Start the camera from wherever the planner left it and let the loop glide
   // in — zoom, tilt, padding and centre all travelling together.

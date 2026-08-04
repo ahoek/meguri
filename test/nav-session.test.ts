@@ -298,14 +298,33 @@ describe('which side of the road', () => {
 
   it('will not be dragged further than a road is wide', () => {
     const { route, prepared: p } = loop()
-    startNavigation(route, { mode: 'walk' })
+    startNavigation(route, { mode: 'bike' })
     fix(ORIGIN, { speed: 0 })
 
     // A 40 m sideways reading is a bad fix or the next street over. Believing
-    // it wholesale would draw the walker through the houses in between.
+    // it wholesale would draw the rider through the houses in between. Still
+    // inside the 45 m a rider is allowed before being called lost, so this is
+    // the cap doing the work rather than the off-route warning.
     stepAside(p, 40)
 
+    expect(nav.offRoute).toBe(false)
     expect(strayM(p)).toBeLessThan(25)
+  })
+
+  /**
+   * Where the cap stops and the warning starts. A walker is called off route at
+   * 25 m, so there is no such thing as an honest 40 m sideways offset on foot —
+   * past that it is not which side of the path you are on, it is a wrong turn,
+   * and the display switches to showing where you actually are.
+   */
+  it('calls a big walking offset a wrong turn rather than a wide path', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'walk' })
+    fix(ORIGIN, { speed: 0 })
+
+    stepAside(p, 40)
+
+    expect(nav.offRoute).toBe(true)
   })
 
   it('ignores the sideways part of a vague fix', () => {
@@ -320,6 +339,51 @@ describe('which side of the road', () => {
     for (let i = 0; i < 4; i++) fix(offset(online, 15, 0), { speed: 4, accuracy: 80 })
 
     expect(strayM(p)).toBeLessThan(2)
+  })
+})
+
+/**
+ * Forty-five metres is ten seconds of riding; at walking pace it is half a
+ * minute spent going the wrong way, which is a street and a half.
+ */
+describe('how soon a wrong turn is called', () => {
+  const strayTo = (p: PreparedRoute, metres: number, accuracy = 8) => {
+    rideTo(p, 0.2)
+    const away = offset(positionAtKm(p, nav.alongKm).position, metres, 0)
+    for (let i = 0; i < 3; i++) fix(away, { speed: 4, accuracy })
+  }
+
+  it('tells a walker at a distance a rider would still be allowed', () => {
+    const walk = loop()
+    startNavigation(walk.route, { mode: 'walk' })
+    fix(ORIGIN, { speed: 0 })
+    strayTo(walk.prepared, 32)
+    expect(nav.offRoute).toBe(true)
+
+    stopNavigation()
+
+    const ride = loop()
+    startNavigation(ride.route, { mode: 'bike' })
+    fix(ORIGIN, { speed: 0 })
+    strayTo(ride.prepared, 32)
+    // Same distance, still on the road you turned onto at riding speed.
+    expect(nav.offRoute).toBe(false)
+  })
+
+  // The price of the tighter threshold: a fix that admits to ±40 m cannot be
+  // evidence of being 30 m off course, and under trees that is a common reading.
+  it('will not be talked into it by a vague fix', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'walk' })
+    fix(ORIGIN, { speed: 0 })
+
+    strayTo(p, 32, 40)
+    expect(nav.offRoute).toBe(false)
+
+    // The same place, reported sharply, is believed.
+    const away = offset(positionAtKm(p, nav.alongKm).position, 32, 0)
+    for (let i = 0; i < 3; i++) fix(away, { speed: 4, accuracy: 8 })
+    expect(nav.offRoute).toBe(true)
   })
 })
 

@@ -1,4 +1,5 @@
 import maplibregl from 'maplibre-gl'
+import { distanceKm } from '../domain/geo'
 import type { LngLat } from '../domain/geo'
 import type { Profile } from '../domain/route'
 
@@ -33,9 +34,15 @@ function lineGradient(mode: Profile): maplibregl.ExpressionSpecification {
 // A path you can walk two abreast on. Drawn to that width on the ground
 // rather than to a pixel count, so it reads as a real path at every zoom
 // instead of a ribbon that swallows the street when you zoom in.
-const PATH_WIDTH_M = 1.5
-const CASING_WIDTH_M = 2.3
+//
+// Two metres rather than the original one and a half: on a phone at arm's
+// length, held at a walking pace, the thinner line was hard to pick out of a
+// basemap that now has legible paths of its own to compete with.
+const PATH_WIDTH_M = 2
+const CASING_WIDTH_M = 2.9
 const EQUATOR_M_PER_PX = 156543.03392 // at zoom 0, 256 px tiles
+// Start and finish this close together are one place, not two.
+const SAME_PLACE_M = 25
 
 /**
  * Line width held constant on the ground.
@@ -178,6 +185,40 @@ export function createRouteLayers(map: maplibregl.Map) {
       if (!map.hasImage('route-arrow')) {
         map.addImage('route-arrow', arrowImage(), { pixelRatio: 2.6 })
       }
+      // Where the loop begins and ends. The planner has a draggable pin for the
+      // start, but navigation takes it away, and on the way round there is
+      // nothing to say where you set off from or where this finishes. On a round
+      // trip the two are one place, so it is usually a single mark.
+      map.addSource('termini', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'termini-halo',
+        type: 'circle',
+        source: 'termini',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 6, 18, 11],
+          'circle-color': '#ffffff',
+          'circle-opacity': 0.95,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': 'rgba(12, 17, 27, 0.25)',
+        },
+      })
+      map.addLayer({
+        id: 'termini-dot',
+        type: 'circle',
+        source: 'termini',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 5.5],
+          // Green for where you started, dark for a finish somewhere else.
+          'circle-color': [
+            'match',
+            ['get', 'role'],
+            ['finish'],
+            '#0f172a',
+            '#047857',
+          ],
+        },
+      })
+
       map.addLayer({
         id: 'route-arrows',
         type: 'symbol',
@@ -256,6 +297,34 @@ export function createRouteLayers(map: maplibregl.Map) {
       source('rejoin-leader')?.setData(coords ? lineFeature(coords) : EMPTY)
     },
 
+    /**
+     * Mark where the loop starts and ends. One mark when they are the same
+     * place, which on a round trip is the normal case; two when a trimmed spur
+     * has left the finish somewhere else.
+     */
+    setTermini(coords: LngLat[] | null) {
+      const src = source('termini')
+      if (!src) return
+      if (!coords || coords.length < 2) {
+        src.setData(EMPTY)
+        return
+      }
+      const start = coords[0]
+      const finish = coords[coords.length - 1]
+      const together = distanceKm(start, finish) * 1000 < SAME_PLACE_M
+      const point = (at: LngLat, role: string) => ({
+        type: 'Feature' as const,
+        properties: { role },
+        geometry: { type: 'Point' as const, coordinates: ll(at) },
+      })
+      src.setData({
+        type: 'FeatureCollection',
+        features: together
+          ? [point(start, 'both')]
+          : [point(start, 'start'), point(finish, 'finish')],
+      })
+    },
+
     showTraveled(visible: boolean) {
       map.setLayoutProperty('traveled-line', 'visibility', visible ? 'visible' : 'none')
     },
@@ -264,6 +333,7 @@ export function createRouteLayers(map: maplibregl.Map) {
       source('rejoin')?.setData(EMPTY)
       source('rejoin-leader')?.setData(EMPTY)
       source('traveled')?.setData(EMPTY)
+      source('termini')?.setData(EMPTY)
     },
 
     boundsOf(coords: LngLat[]) {

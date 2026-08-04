@@ -51,7 +51,15 @@ const ARROW_HEAD: Record<string, string> = {
   finish: 'm8 10 4-4 4 4',
 }
 
-const kind = computed(() => nav.maneuver?.kind ?? 'continue')
+/**
+ * Past the last turn there is no manoeuvre left, and the banner used to fall
+ * back to a bare "continue straight" with the distance field empty — nothing on
+ * it changing again for the rest of the loop, which is indistinguishable from
+ * the guidance having frozen. On a round trip that is the whole run-in to the
+ * finish. So when the turns run out, the finish becomes the instruction and the
+ * distance counts down to it.
+ */
+const kind = computed(() => nav.maneuver?.kind ?? 'finish')
 
 /**
  * A turn landing on top of the next one is part of the same instruction.
@@ -74,10 +82,12 @@ function formatDistance(metres: number | null) {
 }
 
 const maneuverDistance = computed(() => {
-  if (!nav.maneuver) return ''
+  const metres = nav.maneuver
+    ? nav.maneuver.distanceM
+    : nav.remainingKm * 1000 // no turns left: how far to the finish
   // Rounding put "0 m" on the banner once you were on top of the turn.
-  if (nav.maneuver.distanceM < 10) return t('navNow')
-  return formatDistance(nav.maneuver.distanceM)
+  if (metres < 10) return t('navNow')
+  return formatDistance(metres)
 })
 
 const remaining = computed(() => {

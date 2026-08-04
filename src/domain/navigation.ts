@@ -390,6 +390,47 @@ export function maneuverAfter(
   return { ...following, gapM: Math.max(0, (following.atKm - atKm) * 1000) }
 }
 
+/**
+ * Cut a way-back path where it first reaches the route.
+ *
+ * BRouter is asked to route to a point some way ahead along the loop, and often
+ * enough the cheapest path there rejoins the loop earlier and then simply
+ * follows it. Drawn whole, the last stretch is an orange dashed line lying
+ * directly on top of the route it is supposedly leading you back to — which
+ * reads as two different instructions for the same piece of road.
+ *
+ * The path's job ends the moment you are back on the route, so it ends there
+ * too. Distance is recomputed for the part that survives, because that figure
+ * is on the banner and "back to the route: 300 m" must not be counting metres
+ * spent already on it.
+ */
+export function trimToRoute(
+  prepared: PreparedRoute,
+  path: LngLat[],
+  fromIndex: number,
+  meetsM: number,
+): { coordinates: LngLat[]; distanceKm: number } {
+  // From the second vertex on: the first is where you are standing, and if that
+  // already counts as "on the route" there is nothing to draw anyway.
+  let end = path.length - 1
+  for (let i = 1; i < path.length; i++) {
+    const { offRouteM } = locateOnRoute(prepared, path[i], fromIndex, {
+      relocate: false,
+    })
+    if (offRouteM <= meetsM) {
+      end = i
+      break
+    }
+  }
+
+  const coordinates = path.slice(0, end + 1)
+  let total = 0
+  for (let i = 1; i < coordinates.length; i++) {
+    total += distanceKm(coordinates[i - 1], coordinates[i])
+  }
+  return { coordinates, distanceKm: total }
+}
+
 /** Slice the route ahead of the current position, for drawing. */
 export function remainingLine(
   prepared: PreparedRoute,

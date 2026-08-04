@@ -5,6 +5,7 @@ import {
   locateInitial,
   nextManeuver,
   maneuverAfter,
+  trimToRoute,
   routeBearingAt,
   positionAtKm,
   segmentBearingAt,
@@ -58,12 +59,26 @@ const DEMO_DEFAULT_SPEED = 4
 
 const ARRIVE_M = 25
 
-// Consumer GPS wanders by tens of metres between buildings, so a single bad
-// fix must not move you to the next street. Going off route has to be both
-// far enough and sustained.
-const OFF_ROUTE_M = 45
+/**
+ * Consumer GPS wanders by tens of metres between buildings, so a single bad fix
+ * must not move you to the next street. Going off route has to be both far
+ * enough and sustained.
+ *
+ * Far enough is not the same distance on foot as on a bike. Forty-five metres is
+ * about ten seconds of riding and you are still on the road you turned onto; at
+ * walking pace it is more than half a minute spent going the wrong way before
+ * anything is said, and half a minute of walking is a street and a half. So the
+ * walker gets told sooner — with the accuracy guard below to pay for it.
+ */
+const OFF_ROUTE_M: Record<Profile, number> = { walk: 25, bike: 45 }
 const OFF_ROUTE_FIXES = 3
-const BACK_ON_ROUTE_M = 30
+// Hysteresis: comfortably inside the threshold, or the warning flickers on the
+// boundary. Both scale with it.
+const BACK_ON_ROUTE_M: Record<Profile, number> = { walk: 15, bike: 30 }
+// A tighter threshold only works if vague fixes are not allowed to trip it. A
+// reading that admits to ±30 m cannot be evidence of being 25 m off course, and
+// under trees — which is where these walks are — that is a common reading.
+const OFF_ROUTE_ACCURACY_M = 25
 
 // The same reasoning for "you have left the start": one stray reading past the
 // start's radius is not a departure.
@@ -73,6 +88,24 @@ const AWAY_FIXES = 2
 // where you are. Coming back to a screen full of stale conclusions is how
 // navigation ended up announcing things that hadn't happened.
 const STALE_FIX_MS = 20_000
+
+/**
+ * How often to check that fixes are still arriving, and how long a silence has
+ * to last before the watch is assumed dead and replaced.
+ *
+ * Reported from a walk: the instructions stopped updating. There is a way for
+ * that to happen with nothing on screen admitting it — `watchPosition` can stop
+ * delivering without ever calling the error callback, on iOS especially. Every
+ * figure on the display is derived from the last fix, so they all simply stand
+ * still, indefinitely, looking like live guidance that happens to be wrong.
+ *
+ * Until now the only thing that noticed was the visibility handler, which fires
+ * when you come back to the screen and not while you are staring at it. So this
+ * polls: first admit we are stale, then rebuild the watch, which is the only
+ * lever we have that has a chance of restarting the flow.
+ */
+const WATCHDOG_EVERY_MS = 5_000
+const WATCH_RESTART_MS = 45_000
 
 // Nothing plausible happens faster than this, whatever the GPS claims.
 const MAX_SPEED_KMH: Record<Profile, number> = { walk: 12, bike: 45 }
@@ -356,9 +389,15 @@ function onPosition(pos: GeolocationPosition) {
   haveFirstFix = true
   lastFixAt = now
 
-  // Off-route has to persist before we believe it, and clear decisively.
-  if (fix.offRouteM > OFF_ROUTE_M) strayFixes += 1
-  else if (fix.offRouteM < BACK_ON_ROUTE_M) strayFixes = 0
+  // Off-route has to persist before we believe it, and clear decisively. A fix
+  // too vague to locate you within the threshold is not evidence either way, so
+  // it neither accuses nor exonerates — it is simply not counted.
+  const sharpEnough = accuracy == null || accuracy <= OFF_ROUTE_ACCURACY_M
+  if (fix.offRouteM > OFF_ROUTE_M[profileMode]) {
+    if (sharpEnough) strayFixes += 1
+  } else if (fix.offRouteM < BACK_ON_ROUTE_M[profileMode]) {
+    strayFixes = 0
+  }
   nav.offRoute = strayFixes >= OFF_ROUTE_FIXES
 
   // Believe the device over our own estimate: a reported speed settles the
@@ -412,7 +451,12 @@ function onPosition(pos: GeolocationPosition) {
   }
 
   if (nav.voice) {
-    speakManeuver({ maneuver, arrived: nav.arrived, offRoute: nav.offRoute })
+    speakManeuver({
+      maneuver,
+      arrived: nav.arrived,
+      offRoute: nav.offRoute,
+      toFinishM,
+    })
   }
 }
 
@@ -420,6 +464,9 @@ function onPosition(pos: GeolocationPosition) {
 // head of the path stays within a step or two of you: past that the drawn path
 // starts somewhere you are not, which is what the dotted leader has to cover.
 const REJOIN_REFRESH_M = 30
+// Close enough to the route to call the way back finished. Generous enough to
+// catch a path that runs parallel a lane away rather than exactly on it.
+const REJOIN_MEETS_M = 12
 
 /**
  * Route from where you actually are back to the loop. The loop itself is never
@@ -448,10 +495,15 @@ async function maybeRejoin(position: LngLat, fix: { index: number }) {
       signal: rejoinAbort.signal,
     })
     rejoinFrom = position
-    nav.rejoin = {
-      coordinates: path.geometry.coordinates,
-      distanceKm: path.distanceKm,
-    }
+    // Cut where it reaches the loop. Left whole it frequently rejoins earlier
+    // than the point we aimed at and then rides the loop to get there, drawing
+    // orange dashes along the very line it is leading you back to.
+    nav.rejoin = trimToRoute(
+      prepared!,
+      path.geometry.coordinates,
+      fix.index,
+      REJOIN_MEETS_M,
+    )
   } catch {
     /* offline or unroutable — the warning still shows */
   } finally {
@@ -461,6 +513,37 @@ async function maybeRejoin(position: LngLat, fix: { index: number }) {
 
 function onPositionError() {
   nav.ready = false
+}
+
+let watchdog: ReturnType<typeof setInterval> | undefined
+let restartedWatchAt = 0
+
+/** Ask the browser for a fresh watch, dropping the one that went quiet. */
+function openWatch() {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId)
+  watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {
+    enableHighAccuracy: true,
+    maximumAge: 1000,
+    timeout: 15000,
+  })
+}
+
+function checkFixesStillArriving() {
+  // The demo drives itself and cannot go quiet without being told to.
+  if (!nav.active || nav.demo || !lastFixAt) return
+  const silentMs = Date.now() - lastFixAt
+  if (silentMs < STALE_FIX_MS) return
+
+  // Say so first: a screen full of figures that no longer describe anywhere is
+  // worse than one admitting it has lost you.
+  nav.ready = false
+
+  // Then try the only remedy available, and only once per silence, so a genuine
+  // loss of signal in a wood isn't met with a watch rebuilt every five seconds.
+  if (silentMs > WATCH_RESTART_MS && Date.now() - restartedWatchAt > WATCH_RESTART_MS) {
+    restartedWatchAt = Date.now()
+    openWatch()
+  }
 }
 
 export function startNavigation(
@@ -526,13 +609,11 @@ export function startNavigation(
     // hardware, every walking demo would be a demo of a wrong arrow.
     simulateCompass(() => simulatedHeading(prepared!, alongKm))
   } else {
-    watchId = navigator.geolocation.watchPosition(onPosition, onPositionError, {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 15000,
-    })
+    restartedWatchAt = 0
+    openWatch()
     // Must be asked for inside the tap that got us here, or iOS refuses.
     if (mode === 'walk') startCompass()
+    watchdog = setInterval(checkFixesStillArriving, WATCHDOG_EVERY_MS)
   }
 
   acquireWakeLock()
@@ -564,6 +645,8 @@ export function toggleDemoStraying() {
 export function stopNavigation() {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   watchId = null
+  clearInterval(watchdog)
+  watchdog = undefined
   simulation?.stop()
   simulation = null
   simulateCompass(null)

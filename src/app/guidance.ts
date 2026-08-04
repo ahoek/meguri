@@ -68,24 +68,45 @@ function spokenDistance(metres: number) {
   return `${Math.round(metres / 10) * 10}${sep}${unit.m}`
 }
 
-/** "In 200 m, turn left" — Japanese puts the distance first, then the turn. */
-function phrase(maneuver: Maneuver & { distanceM: number }, threshold: number) {
-  const turn = t(`nav_${maneuver.kind}`)
-  if (threshold <= 30) return turn
-  const distance = spokenDistance(maneuver.distanceM)
-  return locale.value === 'ja'
-    ? `${distance}${t('navAhead')}${turn}`
-    : `${t('navIn')} ${distance}, ${turn}`
+/**
+ * Say a thing coming up, once per distance band.
+ *
+ * "In 200 m, turn left" — Japanese puts the distance first, then the turn. Close
+ * enough and the distance is dropped: at twenty metres "turn left" is the whole
+ * of it.
+ */
+function announce(key: string, label: string, metres: number, bands = THRESHOLDS) {
+  const threshold = bands.find((limit) => metres <= limit)
+  if (threshold == null) return
+
+  const alreadySaid = spokenFor.get(key)
+  if (alreadySaid != null && alreadySaid <= threshold) return
+  spokenFor.set(key, threshold)
+
+  if (threshold <= 30) return say(label)
+  const distance = spokenDistance(metres)
+  say(
+    locale.value === 'ja'
+      ? `${distance}${t('navAhead')}${label}`
+      : `${t('navIn')} ${distance}, ${label}`,
+  )
 }
+
+// The finish gets the far bands only. The near one would land inside the radius
+// that triggers "you have arrived" a few seconds later, and being told twice
+// that you are nearly somewhere is worse than being told once.
+const FINISH_THRESHOLDS = [150, 400]
 
 export function speakManeuver({
   maneuver,
   arrived,
   offRoute,
+  toFinishM,
 }: {
   maneuver: (Maneuver & { distanceM: number }) | null
   arrived: boolean
   offRoute: boolean
+  toFinishM?: number
 }) {
   if (arrived) {
     if (!saidArrived) {
@@ -102,15 +123,20 @@ export function speakManeuver({
     return
   }
   saidOffRoute = false
-  if (!maneuver) return
 
-  const key = `${maneuver.index}:${maneuver.kind}`
-  const threshold = THRESHOLDS.find((limit) => maneuver.distanceM <= limit)
-  if (threshold == null) return
+  // Past the last turn there is nothing left to announce but the end of the
+  // walk, and saying nothing at all for the run-in leaves you wondering whether
+  // guidance is still running.
+  if (!maneuver) {
+    if (toFinishM != null) {
+      announce('finish', t('nav_finish'), toFinishM, FINISH_THRESHOLDS)
+    }
+    return
+  }
 
-  const alreadySaid = spokenFor.get(key)
-  if (alreadySaid != null && alreadySaid <= threshold) return
-
-  spokenFor.set(key, threshold)
-  say(phrase(maneuver, threshold))
+  announce(
+    `${maneuver.index}:${maneuver.kind}`,
+    t(`nav_${maneuver.kind}`),
+    maneuver.distanceM,
+  )
 }

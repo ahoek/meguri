@@ -32,10 +32,23 @@ const FIX_INTERVAL_MS = 1000
 // Not below this, however fast the demo runs: every fix is a route projection.
 const MIN_FIX_INTERVAL_MS = 100
 
-// Sideways scatter, in metres. Real fixes wander this much between buildings
-// and under trees, and it is the reason the arrow is drawn beside the line
-// rather than welded to it.
-const JITTER_M = 3.5
+/**
+ * Sideways scatter, in metres — the reason the arrow is drawn beside the line
+ * rather than welded to it.
+ *
+ * The first version drew a fresh random offset every fix, which is white noise,
+ * and white noise is not what a receiver does. Reported from a walk: too erratic,
+ * deviating too far side to side. Both were true — the amplitude was half again
+ * as much as a phone in the open manages, and independent samples once a second
+ * read as vibration rather than as drift.
+ *
+ * Real error wanders: it holds a couple of metres to one side for a while, then
+ * crosses over. So this is a random walk with a gentle pull back to the line, and
+ * a hard bound, which gives the same character at a quarter of the fidget.
+ */
+const JITTER_M = 2.5
+const JITTER_STEP_M = 0.45 // how far the wander can move between fixes
+const JITTER_PULL = 0.08 // and how strongly it is drawn back to the centre
 // What the fixes claim about themselves. Optimistic but not absurd — and under
 // the threshold above which nav-session stops trusting the sideways part.
 const ACCURACY_M = 6
@@ -88,6 +101,7 @@ export function startSimulation(opts: Options): Simulation {
   let paused = false
   let straying = false
   let strayM = 0
+  let wanderM = 0
   let timer: ReturnType<typeof setTimeout> | undefined
 
   /** Faster demo, faster receiver — so the ground covered per fix holds. */
@@ -114,9 +128,13 @@ export function startSimulation(opts: Options): Simulation {
       ? Math.min(strayM + STRAY_GROWTH_M, STRAY_M)
       : Math.max(strayM - STRAY_GROWTH_M, 0)
 
+    // A step in a random direction, less a nudge back towards the line, then
+    // clamped — so it drifts and crosses over instead of buzzing.
+    wanderM += (Math.random() - 0.5) * 2 * JITTER_STEP_M - wanderM * JITTER_PULL
+    wanderM = Math.max(-JITTER_M, Math.min(JITTER_M, wanderM))
+
     const { position } = positionAtKm(opts.route, alongKm)
-    const wander = (Math.random() - 0.5) * 2 * JITTER_M
-    const here = beside(position, bearing, strayM + wander)
+    const here = beside(position, bearing, strayM + wanderM)
 
     opts.onFix({
       coords: {

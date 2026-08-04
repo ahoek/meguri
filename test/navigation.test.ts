@@ -8,8 +8,10 @@ import {
   locateOnRoute,
   nextManeuver,
   maneuverAfter,
+  trimToRoute,
 } from '../src/domain/navigation'
 import { ORIGIN, offset, metresBetween, routeFrom, squareLoop } from './helpers'
+import type { LngLat } from '../src/domain/geo'
 
 const northThenEast = () =>
   prepareRoute(routeFrom([{ north: 200 }, { east: 200 }]))
@@ -158,5 +160,53 @@ describe('maneuvers', () => {
   it('has nothing to add after the last turn', () => {
     const p = withHints([[2, 2, 0, 0, 90]])
     expect(maneuverAfter(p, p.maneuvers[0].atKm)).toBeNull()
+  })
+})
+
+/**
+ * The way back is routed to a point some way ahead along the loop, so it often
+ * rejoins earlier and then rides the loop to get there — drawing an orange
+ * dashed line along the very route it is leading you back to.
+ */
+describe('trimming the way back', () => {
+  // A straight run north, so "on the route" is easy to reason about.
+  const straight = () => prepareRoute(routeFrom([{ north: 400 }]))
+
+  it('ends where it first reaches the route', () => {
+    const p = straight()
+    // Out to one side, back to the line, then a long run along it.
+    const path: LngLat[] = [
+      offset(ORIGIN, 60, 100),
+      offset(ORIGIN, 30, 110),
+      offset(ORIGIN, 0, 120), // on the line
+      offset(ORIGIN, 0, 200), // and onward along it — not ours to draw
+      offset(ORIGIN, 0, 300),
+    ]
+    const trimmed = trimToRoute(p, path, 0, 12)
+
+    expect(trimmed.coordinates).toHaveLength(3)
+    expect(metresBetween(trimmed.coordinates[2], offset(ORIGIN, 0, 120))).toBeLessThan(1)
+  })
+
+  it('reports the distance of what is left, not of the whole path', () => {
+    const p = straight()
+    const path: LngLat[] = [
+      offset(ORIGIN, 60, 100),
+      offset(ORIGIN, 0, 100), // 60 m across, then on the line
+      offset(ORIGIN, 0, 300), // a further 200 m that gets cut
+    ]
+    const trimmed = trimToRoute(p, path, 0, 12)
+    expect(trimmed.distanceKm * 1000).toBeCloseTo(60, 0)
+  })
+
+  it('leaves a path that never reaches the route alone', () => {
+    const p = straight()
+    const path: LngLat[] = [
+      offset(ORIGIN, 200, 100),
+      offset(ORIGIN, 180, 150),
+      offset(ORIGIN, 160, 200),
+    ]
+    const trimmed = trimToRoute(p, path, 0, 12)
+    expect(trimmed.coordinates).toHaveLength(3)
   })
 })
