@@ -213,6 +213,20 @@ watch(
   { deep: true },
 )
 
+/**
+ * Somewhere greener to put a via point, if the map knows of any.
+ *
+ * The map lends this because only it has the landcover polygons loaded. Set to a
+ * no-op until MapView is up, so a route generated before the style loads simply
+ * behaves as it always did.
+ */
+type NudgeVia = (point: LngLat, maxMoveM: number) => LngLat | null
+let nudgeViaToGreen: NudgeVia = () => null
+
+export function setGreenNudger(fn: NudgeVia) {
+  nudgeViaToGreen = fn
+}
+
 let flyId = 0
 let abortController: AbortController | null = null
 let errorTimer: ReturnType<typeof setTimeout> | undefined
@@ -360,6 +374,9 @@ export async function generate({ shuffle = false } = {}) {
       bearing: store.bearing,
       clockwise: store.clockwise,
       waypoints: store.waypoints,
+      // Only hunt for green if green was asked for.
+      preferGreen: nature,
+      nudgeVia: nature ? nudgeViaToGreen : undefined,
       routeThrough: (points) => fetchRoute(points, mode, nature, signal),
     })
   } catch (err) {

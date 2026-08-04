@@ -7,6 +7,7 @@ import {
   addWaypoint,
   moveWaypoint,
   removeWaypoint,
+  setGreenNudger,
 } from '../app/store'
 import { distanceKm } from '../domain/geo'
 import {
@@ -19,6 +20,7 @@ import {
 } from '../app/nav-session'
 import { traveledLine, locateOnRoute } from '../domain/navigation'
 import { createStyleTweaks } from '../map/style'
+import { collectGreen, nudgeToGreen } from '../map/green'
 import { createRouteLayers, ll } from '../map/route-layers'
 import { createMarkers } from '../map/markers'
 import { createPuck } from '../map/puck'
@@ -322,6 +324,14 @@ onMounted(() => {
     attributionControl: { compact: true },
   })
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+
+  // Only the map has the landcover polygons, so it lends the planner a way to
+  // pull via points onto nearby green. Patches are gathered per call and reused
+  // across the loop's attempts — querySourceFeatures walks every loaded tile.
+  setGreenNudger((point, maxMoveM) => {
+    const patches = collectGreen(map, point, maxMoveM / 1000)
+    return nudgeToGreen(point, patches, maxMoveM)
+  })
 
   styleTweaks = createStyleTweaks(map)
   layers = createRouteLayers(map)

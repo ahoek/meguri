@@ -9,9 +9,40 @@ export interface Route {
   distanceKm: number
   durationSec: number
   voicehints: VoiceHint[]
+  /**
+   * Share of the route's length running through woods, parks or open country,
+   * from 0 to 1. Null when the router did not say — the stock profiles do not
+   * ask for the land-cover estimate, so nothing is known and nothing is scored.
+   */
+  greenFraction?: number | null
 }
 
 export type Profile = 'walk' | 'bike'
+
+/**
+ * What greenness is worth when choosing between candidate loops.
+ *
+ * Deliberately smaller than a length error the app would otherwise reject: the
+ * promise is a loop of the length you asked for, and no amount of woodland buys
+ * a route half a kilometre short. But comfortably bigger than the difference
+ * between two loops that both land inside the length tolerance, which is exactly
+ * the choice this exists to settle.
+ */
+const GREEN_WEIGHT = 0.35
+// Green enough to stop looking for something greener.
+const GREEN_ENOUGH = 0.55
+// How many directions to try before accepting a loop that fits but is grey.
+// A cap, not a target: somewhere with no green at all must not spend every
+// attempt discovering that, on infrastructure shared with everyone else.
+const GREEN_SEARCH_ATTEMPTS = 3
+// Rotating by roughly a seventh of the compass each time covers new ground
+// rather than nudging into the same terrain.
+const GREEN_SEARCH_TURN = 53
+// How far a via point may be dragged off its circle, as a share of the radius.
+// Measured: 0.9 pulled hard enough to break the length promise outright — a 2 km
+// ask came back 0.92 km and 2.47 km — so the ceiling here is not squeamishness,
+// it is the point past which the loop stops being the length you asked for.
+const VIA_NUDGE_SHARE = 0.45
 
 /**
  * Routes through the given points and returns the resulting track. The
@@ -178,6 +209,8 @@ export async function generateLoop({
   bearing,
   clockwise,
   waypoints = [],
+  preferGreen = false,
+  nudgeVia,
   routeThrough,
 }: {
   start: LngLat
@@ -185,19 +218,44 @@ export async function generateLoop({
   bearing: number
   clockwise: boolean
   waypoints?: LngLat[]
+  /**
+   * Spend attempts looking for a route through woods and parks, and let
+   * greenness break a tie between candidates. Off unless the rider asked for
+   * nature — someone who wants the quickest loop of the right length should not
+   * be sent the scenic one, nor pay the extra routing calls to find it.
+   */
+  preferGreen?: boolean
+  /**
+   * Given a generated via point, somewhere greener nearby to use instead — or
+   * null to leave it be. Injected, because only the map knows where the parks
+   * are and the domain does not talk to the map.
+   */
+  nudgeVia?: (point: LngLat, maxMoveM: number) => LngLat | null
   routeThrough: RouteThrough
 }): Promise<Route> {
   let radius = Math.max(0.12, targetKm / (2 * Math.PI))
   let currentBearing = bearing
   let viaCount = 4
+  let greenTries = 0
+  let bestGreen = 0
+  const searchingGreen = preferGreen && !waypoints.length
   let best: Route | null = null
   let bestScore = Infinity
   let lastError: unknown = null
 
   for (let attempt = 0; attempt < 7; attempt++) {
-    const via = waypoints.length
+    const circle = waypoints.length
       ? loopViaWithWaypoints(start, waypoints, radius, currentBearing, clockwise, viaCount)
       : loopViaPoints(start, radius, currentBearing, clockwise, viaCount)
+
+    // The circle sets the length and keeps the legs apart; it was never meant to
+    // be walked exactly. Pull each point onto nearby green and the router threads
+    // the legs through parks instead of past them — which is the whole ask, and
+    // it costs no extra routing calls.
+    const via =
+      preferGreen && nudgeVia
+        ? circle.map((p) => nudgeVia(p, radius * 1000 * VIA_NUDGE_SHARE) ?? p)
+        : circle
 
     let route: Route
     try {
@@ -251,13 +309,32 @@ export async function generateLoop({
 
     // Riding the same road twice annoys more than a kilometre missing, so
     // overlap dominates the score — but a missed stop outranks them both.
-    const score = missed * 100 + distErr + overlap * 4
+    //
+    // And then greenness, which is why a loop starting at the edge of a park
+    // used to walk into town instead. The direction of the loop is the single
+    // thing that decides this, it was picked at random, and nothing ever
+    // measured the result: seven candidates would be generated and the greenest
+    // one thrown away because a greyer one was forty metres closer to target.
+    // Weighted below overlap and above distance, so it beats a rounding error in
+    // length but never sends you round the same block twice.
+    const green = preferGreen ? route.greenFraction : null
+    const greenScore = typeof green === 'number' ? (1 - green) * GREEN_WEIGHT : 0
+    const score = missed * 100 + distErr + overlap * 4 + greenScore
 
     if (score < bestScore) {
       best = route
       bestScore = score
     }
-    if (!missed && distErr < 0.06 && overlap < 0.08) break
+    if (typeof green === 'number') bestGreen = Math.max(bestGreen, green)
+
+    // Good enough to stop — unless there might be a greener way round. The old
+    // condition took the first candidate that fitted, which on a park's edge was
+    // usually the one heading into town, because the very first bearing tried is
+    // a random one. Now a fitting-but-grey loop buys a few more directions
+    // before we settle, and a fitting green one still stops immediately.
+    const fits = !missed && distErr < 0.06 && overlap < 0.08
+    const greenEnough = green == null || green >= GREEN_ENOUGH
+    if (fits && (greenEnough || attempt >= GREEN_SEARCH_ATTEMPTS)) break
     // With nothing left to remove, over-target means the waypoints themselves
     // demand the distance — a clean loop through them is as good as it gets.
     if (
@@ -271,7 +348,21 @@ export async function generateLoop({
 
     const overLength = waypoints.length && route.distanceKm > targetKm * 1.1
 
-    if (overlap > 0.08) {
+    // Still nothing green: sweep the direction, every attempt, whatever the
+    // length is doing.
+    //
+    // Two earlier versions of this failed for the same reason — they only turned
+    // when the candidate already fitted on length and overlap, and at a park's
+    // edge it usually doesn't, so the bearing never moved and all seven attempts
+    // explored one random direction. Refining the radius is worthless if you are
+    // refining it in the wrong half of the compass. Alternating sides covers
+    // roughly the whole circle over seven attempts, and the radius adaptation
+    // below keeps working across them.
+    if (searchingGreen && bestGreen < GREEN_ENOUGH && !waypoints.length) {
+      greenTries += 1
+      const side = greenTries % 2 === 1 ? -1 : 1
+      currentBearing = bearing + side * Math.ceil(greenTries / 2) * GREEN_SEARCH_TURN
+    } else if (overlap > 0.08) {
       // Doubling back: swing towards new terrain, and pin the loop to its
       // circle with an extra via point so two legs can't collapse onto the
       // same road between them — unless the waypoints already make the loop

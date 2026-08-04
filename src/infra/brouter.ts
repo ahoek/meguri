@@ -72,7 +72,51 @@ async function requestRoute(
     durationSec: Number(feature.properties['total-time']),
     // [pointIndex, command, exitNumber, distanceToNext, angle] per maneuver
     voicehints: feature.properties.voicehints ?? [],
+    greenFraction: greenFraction(feature.properties.messages),
   }
+}
+
+// BRouter's own land-cover estimate, 0 (none) to 6 (deep woodland). From this
+// class up, a way counts as running through green rather than past it.
+const GREEN_CLASS = 4
+
+/**
+ * How much of a route runs through green, read out of BRouter's per-segment
+ * message table.
+ *
+ * This costs nothing: the nature profiles already reference
+ * `estimated_forest_class`, so BRouter already returns it alongside the geometry
+ * we asked for. It was being thrown away, which is why the planner could compare
+ * two candidate loops and have no idea one of them went through a park.
+ *
+ * Null rather than zero when the column is missing — the stock profiles do not
+ * ask for the estimate, and "not measured" must not be scored as "not green".
+ */
+function greenFraction(messages: unknown): number | null {
+  if (!Array.isArray(messages) || messages.length < 2) return null
+  const header = messages[0]
+  if (!Array.isArray(header)) return null
+  const tagCol = header.indexOf('WayTags')
+  const distCol = header.indexOf('Distance')
+  if (tagCol < 0 || distCol < 0) return null
+
+  let total = 0
+  let green = 0
+  let sawEstimate = false
+  for (const row of messages.slice(1)) {
+    const metres = Number(row[distCol])
+    if (!Number.isFinite(metres)) continue
+    total += metres
+    for (const tag of String(row[tagCol]).split(' ')) {
+      if (!tag.startsWith('estimated_forest_class=')) continue
+      sawEstimate = true
+      if (Number(tag.slice('estimated_forest_class='.length)) >= GREEN_CLASS) {
+        green += metres
+      }
+    }
+  }
+  if (!total || !sawEstimate) return null
+  return green / total
 }
 
 const reRegistered: Partial<Record<Profile, boolean>> = {}
