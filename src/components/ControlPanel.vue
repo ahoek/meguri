@@ -569,13 +569,22 @@ const routeStats = computed(() => {
     will-change: transform;
   }
 
-  /* The strip only needs to be button-sized while it is carrying one. */
+  /* The strip only needs to be button-sized while it is carrying one — and
+     when it is, that button is the whole point of the screen: the route is
+     drawn, the map is full height, and the one thing left to do is set off.
+     It was 31 px tall and 7 px off the bottom of the glass, which is under
+     the 44 px a thumb is owed and inside the strip the system itself claims
+     for the home swipe — so half the taps that missed weren't the user's. */
   .panel:has(.mini-start) {
-    --handle-strip: 46px;
+    --handle-strip: 66px;
+    /* Lift the strip clear of the bottom edge, on top of whatever the home
+       indicator already asks for. */
+    --handle-lift: 10px;
   }
 
   .panel {
-    --handle-h: calc(var(--handle-strip) + var(--handle-pad));
+    --handle-lift: 0px;
+    --handle-h: calc(var(--handle-strip) + var(--handle-pad) + var(--handle-lift));
   }
 
   .panel.collapsed {
@@ -603,7 +612,7 @@ const routeStats = computed(() => {
     flex: none;
     height: var(--handle-h);
     /* Keep the grabber and buttons clear of the home indicator. */
-    padding-bottom: var(--handle-pad);
+    padding-bottom: calc(var(--handle-pad) + var(--handle-lift));
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
   }
@@ -624,21 +633,24 @@ const routeStats = computed(() => {
   .mini-start {
     display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: 8px;
     flex: none;
-    margin-right: 12px;
-    padding: 7px 13px;
-    border-radius: 11px;
-    font-size: 13.5px;
+    min-height: 46px;
+    margin-right: 14px;
+    padding: 0 20px;
+    border-radius: 14px;
+    font-size: 15.5px;
     font-weight: 700;
+    letter-spacing: -0.01em;
     color: #fff;
     background: var(--accent-gradient);
-    box-shadow: 0 6px 16px -6px var(--accent-1);
+    box-shadow: 0 8px 20px -7px var(--accent-1);
   }
 
   .mini-start svg {
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
   }
 
   .grabber {
