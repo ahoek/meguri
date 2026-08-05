@@ -135,6 +135,52 @@ describe('starting navigation', () => {
     expect(nav.remainingKm).toBeCloseTo(p.totalKm, 1)
   })
 
+  /**
+   * Reported from a walk: navigation congratulated the walker on the loop
+   * within seconds of starting it.
+   *
+   * A phone hands over a coarse network fix while the GPS warms up — hundreds
+   * of metres out, and honest about it in `accuracy`. That was read as having
+   * left the start, which unlocked the full-route rescan, and the first sharp
+   * fix afterwards landed a couple of metres onto the leg that comes *back* to
+   * the start. Same pavement, opposite ends of the line.
+   */
+  it('is not fooled into a finished lap by a coarse opening fix', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'walk' })
+
+    fix(offset(ORIGIN, 250, 120), { accuracy: 300 })
+    fix(offset(ORIGIN, 190, 260), { accuracy: 400 })
+
+    // The walker has not moved: still on the start, a few metres round onto
+    // the returning leg.
+    for (let i = 0; i < 6; i++) fix(offset(ORIGIN, 4, 0), { speed: 0 })
+
+    expect(nav.arrived).toBe(false)
+    expect(nav.alongKm).toBeLessThan(p.totalKm * 0.5)
+  })
+
+  /**
+   * The same false finish by a different door. Here the walker really did
+   * leave — three hundred metres up the road, then back again for something
+   * they forgot — so the rescan is legitimately unlocked. Standing on the
+   * start, the nearest point on the whole line is the finish, which is no
+   * evidence of a lap: it is one reading that fits both ends equally well.
+   */
+  it('is not fooled by a walker who sets off, comes back, and waits', () => {
+    const { route, prepared: p } = loop()
+    startNavigation(route, { mode: 'walk' })
+    fix(ORIGIN, { speed: 0 })
+    rideTo(p, 0.3, { speed: 1.4 })
+
+    // Back on the doorstep, a few metres round onto the returning leg — where
+    // the finish fits the reading to the centimetre and the start does not.
+    for (let i = 0; i < 8; i++) fix(offset(ORIGIN, 4, 0), { speed: 0 })
+
+    expect(nav.arrived).toBe(false)
+    expect(nav.alongKm).toBeLessThan(p.totalKm * 0.5)
+  })
+
   it('still catches up when the loop was ridden with the screen off', () => {
     const { route, prepared: p } = loop()
     startNavigation(route, { mode: 'bike' })

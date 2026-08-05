@@ -357,16 +357,30 @@ function onPosition(pos: GeolocationPosition) {
   nav.accuracy = accuracy
 
   // Standing near the start, the finish is under your feet too. Refuse to be
-  // relocated across the loop until we have watched you leave.
+  // relocated across the loop until we have watched you leave — and watching
+  // means a fix that puts you outside the radius even after its own error is
+  // allowed for. A reading 250 m out that admits to ±300 m is consistent with
+  // standing on the doorstep, and taking it as a departure is what let the
+  // next sharp fix be read as a completed lap.
+  const fromStartM = distanceKm(position, prepared!.coords[0]) * 1000
   if (!leftStart) {
-    const fromStartM = distanceKm(position, prepared!.coords[0]) * 1000
-    awayFixes = fromStartM > AT_START_M ? awayFixes + 1 : 0
+    const surelyAway = fromStartM - Math.max(accuracy ?? 0, 0) > AT_START_M
+    awayFixes = surelyAway ? awayFixes + 1 : 0
     if (awayFixes >= AWAY_FIXES) leftStart = true
   }
 
+  // And while you are actually standing there, no rescan either, however long
+  // you have been gone. A rescan searches the whole line for the nearest
+  // match, and on that spot the nearest match is the finish — it fits to the
+  // centimetre, where the start is a pavement's width away. Walk out, turn
+  // back for something you forgot, and the walk would be declared over on the
+  // doorstep. The window still tracks you, so a belief left up the road walks
+  // itself home over the next few fixes instead of jumping to the end.
   const fix = haveFirstFix
-    ? locateOnRoute(prepared!, position, lastIndex, { relocate: leftStart })
-    : locateInitial(prepared!, position)
+    ? locateOnRoute(prepared!, position, lastIndex, {
+        relocate: leftStart && fromStartM >= AT_START_M,
+      })
+    : locateInitial(prepared!, position, accuracy)
 
   const accepted = plausible(fix.alongKm, now)
   if (accepted) {

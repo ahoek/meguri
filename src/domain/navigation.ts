@@ -124,16 +124,25 @@ const TIE_M = 20 // candidates this close to the best are treated as equal
  * nearest-point search can just as easily snap to the end of the line —
  * which reads as "you have already gone all the way round". Among all
  * near-equal candidates, take the earliest one.
+ *
+ * A vague fix widens that radius by its own admitted error. The first reading
+ * a phone offers is often a coarse network fix hundreds of metres out while
+ * the GPS is still warming up, and one that cannot rule out the start point
+ * must not be used to rule it out.
  */
 export const AT_START_M = 90
 
-export function locateInitial(prepared: PreparedRoute, position: LngLat): RouteFix {
+export function locateInitial(
+  prepared: PreparedRoute,
+  position: LngLat,
+  accuracy: number | null = null,
+): RouteFix {
   const { coords, cumulative } = prepared
 
   // Navigation starts where the loop starts. If we're anywhere near that
   // point, we are at the beginning of the route — not at the end of it,
   // which sits on exactly the same spot.
-  if (distanceKm(position, coords[0]) * 1000 < AT_START_M) {
+  if (distanceKm(position, coords[0]) * 1000 < AT_START_M + Math.max(accuracy ?? 0, 0)) {
     return { index: 0, snapped: coords[0], alongKm: 0, offRouteM: 0 }
   }
 
