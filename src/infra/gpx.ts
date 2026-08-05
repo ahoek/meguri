@@ -63,15 +63,18 @@ export function canShareGpx() {
  * Must be called straight from the tap: iOS refuses a share that arrives after
  * an await, so the file is built synchronously before anything is asked for.
  *
- * `files` and nothing else. Adding a `title` alongside it is the documented way
- * to lose the very apps this exists for: iOS then treats the share as a title
- * carrying an attachment rather than as a file, and the route apps — which
- * registered themselves against the GPX type and not against text — never come
- * up as targets. The sheet still opens, which is what makes it look like it
- * worked. Reported from the phone: Save to Files and AirDrop, no Komoot, no
- * Bosch Flow. Nothing is lost by dropping it: the walk names itself twice over,
- * in the filename and in the GPX's own `<name>`, which is the one the route
- * apps actually read.
+ * `files` and nothing else, which is the shape iOS documents for sharing a
+ * file. Nothing is lost by it: the walk names itself twice over already, in
+ * the filename and in the GPX's own `<name>`, which is the one a route app
+ * reads.
+ *
+ * It did not, however, fix what it was written for — read "Known limit" in
+ * `docs/device-integration.md` before touching any of this. The sheet reaches
+ * Files, AirDrop and the apps that take any file at all, but not the route
+ * apps that register themselves against GPX, while the same file shared from
+ * Files does reach them. Same in Safari and in Chrome on iOS. The apps, the
+ * MIME type, the filename and this call's shape have all been checked and are
+ * not it. Keep this shape anyway; it is the documented one.
  */
 export async function shareGpx(route: Route, kind: string) {
   const gpx = gpxDocument(route, kind)

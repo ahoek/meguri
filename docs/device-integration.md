@@ -39,6 +39,48 @@ See also the permissions research in the session memory: iOS caches a refused
 compass per origin and offers no way to query it without prompting, which is
 why `off` and `denied` share a branch.
 
+### Known limit: the sheet reaches file apps, not route apps
+
+Tested on the phone 2026-08-05, in **Chrome on iOS and in Safari — both the
+same**. The sheet opens and the file goes over, but the targets are Discord,
+WhatsApp, AirDrop and Save to Files: the apps that accept any file at all.
+Komoot and Bosch Flow, the two this feature exists for, do not appear. Parked
+rather than solved.
+
+Ruled out by measurement. None of this is worth doing again:
+
+- **The apps.** Sharing the *same* file from Files shows both of them, so they
+  ship share extensions and they do accept GPX.
+- **The MIME type and the filename.** `WKShareSheet.mm` writes the file to a
+  temp URL under its own name and resolves the type from the *extension* via
+  `UTType`, with no allowlist, and
+  `ResourceResponseBase::sanitizeSuggestedFilename` only escapes backslashes
+  and quotes — so `meguri-5.4km.gpx` arrives intact. Changing either on a hunch
+  is wasted work.
+- **The `title` that used to ride along in the share call.** Passing anything
+  besides `files` really does break file sharing on iOS
+  ([mdn/content#32019](https://github.com/mdn/content/issues/32019)) and the
+  fix was right to make, but it changed nothing here.
+- **The browser.** Chrome on iOS puts up its own sheet rather than WebKit's, so
+  it was worth testing Safari separately. Safari behaves identically, which
+  means the sheet implementation is not the difference either.
+
+So: the same bytes, under the same name, reach Komoot from Files and not from
+`navigator.share`. The remaining difference is the hand-off itself — a file
+handed over from a temporary sharing container, versus one the user has saved.
+That is not somewhere the web app has a lever.
+
+**The one test worth doing first, if this is ever picked up again**, because it
+closes the question either way and takes a minute: from Meguri's sheet choose
+Save to Files, then share *that* file from Files. If Komoot appears, the file
+we produce is correct and the loss is entirely in the Web Share hand-off —
+stop, and document it as a platform limit rather than tuning the call further.
+If Komoot does not appear, the file is wrong after all, and the name, the
+extension and the bytes are all back on the table.
+
+Not urgent: Save to Files and share from there reaches both apps today, which
+is one extra tap on a thing you do once per route.
+
 ## Worth doing, works on an iPhone
 
 **`navigator.storage.persist()` and `estimate()`.** The tile cache is what a
