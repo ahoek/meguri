@@ -481,13 +481,25 @@ const REJOIN_REFRESH_M = 30
 // Close enough to the route to call the way back finished. Generous enough to
 // catch a path that runs parallel a lane away rather than exactly on it.
 const REJOIN_MEETS_M = 12
+/**
+ * How far past the nearest point to aim the way back.
+ *
+ * Far enough that the path leads forward along the loop instead of doubling
+ * back to the exact spot you left it; short enough that it is still the way
+ * back. Measured in metres, because vertices are not a distance: BRouter
+ * spaces them by shape, so the eight it used to count ahead were twenty
+ * metres on a mapped corner and two kilometres on a straight — and a target
+ * two kilometres up the loop is not answered by the shortest way back to the
+ * route, it is answered by a route to somewhere else.
+ */
+const REJOIN_AHEAD_M = 40
 
 /**
  * Route from where you actually are back to the loop. The loop itself is never
  * rewritten — a round trip of a chosen length only stays that if it survives
  * intact — so this is a separate "get back on" path.
  */
-async function maybeRejoin(position: LngLat, fix: { index: number }) {
+async function maybeRejoin(position: LngLat, fix: { index: number; alongKm: number }) {
   if (nav.rejoining) return
   if (rejoinFrom && distanceKm(rejoinFrom, position) * 1000 < REJOIN_REFRESH_M) {
     return
@@ -495,8 +507,7 @@ async function maybeRejoin(position: LngLat, fix: { index: number }) {
 
   // Aim a little ahead of the nearest point so the path leads forward along
   // the loop rather than doubling back to where you left it.
-  const lookahead = Math.min(fix.index + 8, prepared!.coords.length - 1)
-  const target = prepared!.coords[lookahead]
+  const target = positionAtKm(prepared!, fix.alongKm + REJOIN_AHEAD_M / 1000).position
 
   nav.rejoining = true
   rejoinAbort?.abort()

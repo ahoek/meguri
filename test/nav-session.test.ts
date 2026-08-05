@@ -433,6 +433,47 @@ describe('how soon a wrong turn is called', () => {
   })
 })
 
+/**
+ * Reported from a walk: the way back was not the way back. It is routed to a
+ * point a little further along the loop, and that point used to be counted in
+ * vertices — but BRouter spaces vertices by shape, so eight of them is twenty
+ * metres round a mapped corner and two kilometres along a straight.
+ */
+describe('the way back after a wrong turn', () => {
+  it('aims just up the loop, not hundreds of metres along it', async () => {
+    const requests: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: unknown) => {
+        requests.push(String(url))
+        return new Promise(() => {})
+      }),
+    )
+
+    // Vertices 300 m apart, the spacing of a long straight cycle path.
+    const route = squareLoop(1200, 300)
+    const p = prepareRoute(route)
+    // `nature: false` skips registering a custom profile, so the first request
+    // is the one we are here to read.
+    startNavigation(route, { mode: 'walk', nature: false })
+    fix(ORIGIN, { speed: 0 })
+    rideTo(p, 0.2, { speed: 1.4 })
+
+    const away = offset(positionAtKm(p, nav.alongKm).position, 40, 0)
+    for (let i = 0; i < 3; i++) fix(away, { speed: 1.4 })
+    expect(nav.offRoute).toBe(true)
+
+    const routing = requests.find((url) => url.includes('lonlats='))
+    const [, target] = decodeURIComponent(
+      routing!.match(/lonlats=([^&]+)/)![1],
+    ).split('|')
+    const aimedAtKm = locateOnRoute(p, target.split(',').map(Number) as LngLat, 0)
+      .alongKm
+
+    expect((aimedAtKm - nav.alongKm) * 1000).toBeLessThan(100)
+  })
+})
+
 describe('leaving the route', () => {
   it('needs several fixes off the line before it complains', () => {
     const { route, prepared: p } = loop()
