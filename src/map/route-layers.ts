@@ -121,8 +121,6 @@ function arrowSizeAt(zoom: number) {
  * like two routes; it also has to be paid for at every corner, below.
  */
 const LANE_OFFSET_M = PATH_WIDTH_M / 2 + 0.1
-const LANE_MIN_PX = 3
-
 /**
  * Corners, rounded, because an offset line cannot turn one.
  *
@@ -283,10 +281,36 @@ export function roundCorners(coords: LngLat[]): LngLat[] {
   return out
 }
 
-/** What `groundWidth` resolves to at one zoom, as a number. */
-function groundPx(metres: number, lat: number, minPx: number, zoom: number) {
+/**
+ * The separation gets no floor under it, unlike the widths above.
+ *
+ * A floor holds the lanes apart on screen after the ground has stopped
+ * justifying it — a few pixels at a zoom where a few pixels is thirty metres —
+ * and the turnaround, which is built out of real metres, cannot then reach
+ * across a gap invented in pixels: the loop at the tip shrinks to nothing
+ * while the lanes it is there to join stay resolutely apart. So the separation
+ * is left to the ground, and the lanes slide together into one line at the
+ * zoom where two metres stops being a pixel — which is the zoom where there
+ * was nothing to tell apart anyway.
+ */
+function groundOffset(metres: number, lat: number): maplibregl.ExpressionSpecification {
   const perPx = EQUATOR_M_PER_PX * Math.cos((lat * Math.PI) / 180)
-  return Math.max(minPx, (metres * Math.pow(2, zoom)) / perPx)
+  const pxAt = (zoom: number) => (metres * Math.pow(2, zoom)) / perPx
+  return [
+    'interpolate',
+    ['exponential', 2],
+    ['zoom'],
+    0,
+    pxAt(0),
+    22,
+    pxAt(22),
+  ] as maplibregl.ExpressionSpecification
+}
+
+/** The same thing at one zoom, as a number. */
+function groundPx(metres: number, lat: number, zoom: number) {
+  const perPx = EQUATOR_M_PER_PX * Math.cos((lat * Math.PI) / 180)
+  return (metres * Math.pow(2, zoom)) / perPx
 }
 
 /**
@@ -302,7 +326,7 @@ function groundPx(metres: number, lat: number, minPx: number, zoom: number) {
 export function laneIconOffset(lat: number): maplibregl.ExpressionSpecification {
   const stops: unknown[] = []
   for (let z = 11; z <= 22; z++) {
-    const px = groundPx(LANE_OFFSET_M, lat, LANE_MIN_PX, z) / arrowSizeAt(z)
+    const px = groundPx(LANE_OFFSET_M, lat, z) / arrowSizeAt(z)
     stops.push(z, ['literal', [0, px]])
   }
   // `interpolate` takes arrays of numbers as well as numbers, which is the
@@ -356,7 +380,7 @@ export function createRouteLayers(map: maplibregl.Map) {
   let lanes = false
 
   function applyLanes() {
-    const offset = lanes ? groundWidth(LANE_OFFSET_M, lat, LANE_MIN_PX) : 0
+    const offset = lanes ? groundOffset(LANE_OFFSET_M, lat) : 0
     for (const id of ['route-line', 'route-casing', 'traveled-line']) {
       if (map.getLayer(id)) map.setPaintProperty(id, 'line-offset', offset)
     }
