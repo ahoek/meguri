@@ -112,6 +112,42 @@ function overlapFraction(coords: LngLat[]) {
   return total ? repeated / total : 0
 }
 
+/**
+ * Is there a stretch the route walks twice, long enough to be worth drawing as
+ * two lanes?
+ *
+ * The longest unbroken doubled run, not the total and not a share of the
+ * route: a hundred metres walked in both directions is exactly as confusing on
+ * a two-kilometre stroll as on a twenty-kilometre ride, and a loop that clips
+ * its own path at four separate junctions has no there-and-back leg at all,
+ * however the four add up. The case this exists for is the lollipop — out
+ * along a path and back down the same one, which is the shape the start of a
+ * loop most often takes.
+ *
+ * Fifty metres is about the shortest doubled stretch worth the trouble; below
+ * that it is a junction touching itself, and a metre and a half of offset buys
+ * nothing.
+ */
+const DOUBLED_BACK_M = 50
+
+export function doublesBack(coords: LngLat[]) {
+  const seen = new Set<string>()
+  const key = (p: LngLat) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`
+  let run = 0
+  let longest = 0
+  for (let i = 1; i < coords.length; i++) {
+    const edge = [key(coords[i - 1]), key(coords[i])].sort().join('|')
+    if (seen.has(edge)) {
+      run += distanceKm(coords[i - 1], coords[i]) * 1000
+      longest = Math.max(longest, run)
+    } else {
+      seen.add(edge)
+      run = 0
+    }
+  }
+  return longest >= DOUBLED_BACK_M
+}
+
 // How much closer the untrimmed route got to a stop before we count the stop
 // as lost. Rounding and a dropped duplicate vertex are worth a few metres.
 const TRIM_SLACK_M = 25

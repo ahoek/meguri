@@ -25,6 +25,7 @@ import { createPuck } from '../map/puck'
 import { createFollowCamera } from '../map/follow'
 import { locale, t } from '../i18n'
 import type { LngLat } from '../domain/geo'
+import { doublesBack } from '../domain/route'
 import type { Route } from '../domain/route'
 import type { Projection } from '../app/nav-session'
 import type { Framing } from '../map/follow'
@@ -123,6 +124,9 @@ function drawRoute(route: Route) {
   const coords = route.geometry.coordinates
   layers.setGradient(store.mode)
   layers.applyWidths(routeLat()) // metres per pixel depend on where the loop is
+  // Asked of the whole route before the draw-in starts: a partial slice does
+  // not know yet that it is going to come back along the path it is on.
+  layers.useLanes(doublesBack(coords))
   map.fitBounds(layers.boundsOf(coords), { padding: fitPadding(), duration: 900 })
 
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {

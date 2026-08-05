@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { generateLoop } from '../src/domain/route'
-import { ORIGIN, offset, metresBetween } from './helpers'
+import { doublesBack, generateLoop } from '../src/domain/route'
+import { ORIGIN, offset, metresBetween, squareLoop } from './helpers'
 import type { LngLat } from '../src/domain/geo'
 import type { Route, RouteThrough, VoiceHint } from '../src/domain/route'
 
@@ -163,5 +163,40 @@ describe('waypoints', () => {
     })
 
     expect(route.geometry.coordinates).toHaveLength(3)
+  })
+})
+
+/**
+ * A loop that goes out along a path and comes back down the same one draws
+ * both legs on top of each other: one colour, and two sets of chevrons
+ * pointing opposite ways along the same line. The map answers that by drawing
+ * the two legs as lanes, one either side of the path — but only where there is
+ * really a leg walked twice, because the whole route shifts to do it.
+ */
+describe('spotting a there-and-back leg', () => {
+  it('leaves a loop that never repeats itself on the centreline', () => {
+    expect(doublesBack(squareLoop(400).geometry.coordinates)).toBe(false)
+  })
+
+  it('sees the stick of a lollipop', () => {
+    // 200 m out, once round a small block, and back down the same 200 m.
+    const out: LngLat[] = []
+    for (let m = 0; m <= 200; m += 20) out.push(offset(ORIGIN, 0, m))
+    const top = out[out.length - 1]
+    const block = squareLoop(120, 20).geometry.coordinates.map((c) => [
+      c[0] + (top[0] - ORIGIN[0]),
+      c[1] + (top[1] - ORIGIN[1]),
+    ]) as LngLat[]
+
+    expect(doublesBack([...out, ...block, ...out.slice().reverse()])).toBe(true)
+  })
+
+  // Four junctions clipped in passing add up to a hundred metres and are not a
+  // there-and-back leg. The longest single run is what decides it.
+  it('is not fooled by a loop that clips its own path here and there', () => {
+    const coords = squareLoop(400).geometry.coordinates.slice()
+    for (const at of [10, 25, 40, 55]) coords.push(coords[at], coords[at + 1])
+
+    expect(doublesBack(coords)).toBe(false)
   })
 })
