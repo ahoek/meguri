@@ -213,40 +213,104 @@ export function locateOnRoute(
     position,
     indexAtKm(cumulative, at - WINDOW_BACK_KM),
     Math.min(coords.length - 1, indexAtKm(cumulative, at + WINDOW_AHEAD_KM) + 1),
+    at,
   )
   if (!relocate || windowed.offRouteM <= RELOCATE_M) return windowed
-  const full = scan(prepared, position, 0, coords.length - 1)
+  const full = scan(prepared, position, 0, coords.length - 1, at)
   return full.offRouteM < windowed.offRouteM - RELOCATE_MARGIN_M ? full : windowed
 }
 
+/**
+ * How close two candidates have to be before the route decides between them
+ * rather than the tape measure.
+ *
+ * On a path walked in both directions, standing anywhere puts you at two
+ * places along the route at once — a hundred metres out and, on the same
+ * paving stone, six hundred metres on the way home. Both fit the reading
+ * perfectly, and which one comes out nearest is then settled by whether the
+ * router happened to lay its vertices down in quite the same spots on the way
+ * back. It does not, so the answer was a coin toss, and losing it meant being
+ * told you were on the way home before you had reached the turnaround.
+ *
+ * Ten metres is wider than that difference will ever be and narrower than any
+ * real choice between two different pieces of road.
+ */
+const SAME_GROUND_M = 10
+// And how far apart two readings have to be along the route before they count
+// as answers to different questions rather than the same one measured twice.
+const ELSEWHERE_KM = 0.05
+
+/**
+ * The closest point on a stretch of the route — and where two are equally
+ * close, the one nearest to where we already thought we were.
+ *
+ * Continuity is the only evidence there is here. It is also the right evidence
+ * in both directions: on the way out the outbound reading is the near one, and
+ * on the way home it is the homeward reading, without either being singled out.
+ */
 function scan(
   prepared: PreparedRoute,
   position: LngLat,
   start: number,
   end: number,
+  anchorKm?: number,
 ): RouteFix {
   const { coords, cumulative } = prepared
-  let bestDist = Infinity
-  let bestIndex = start
-  let bestAlong = cumulative[start]
-  let bestPoint = coords[start]
+  const candidates: { d: number; index: number; point: LngLat; along: number }[] = []
+  let nearest = Infinity
 
   for (let i = start; i < end; i++) {
     const { point, t } = projectOnSegment(coords[i], coords[i + 1], position)
     const d = distanceKm(position, point)
-    if (d < bestDist) {
-      bestDist = d
-      bestIndex = i
-      bestPoint = point
-      bestAlong = cumulative[i] + t * (cumulative[i + 1] - cumulative[i])
+    nearest = Math.min(nearest, d)
+    candidates.push({
+      d,
+      index: i,
+      point,
+      along: cumulative[i] + t * (cumulative[i + 1] - cumulative[i]),
+    })
+  }
+
+  if (!candidates.length) {
+    return {
+      index: start,
+      snapped: coords[start],
+      alongKm: cumulative[start],
+      offRouteM: Infinity,
     }
   }
 
+  // The plain answer first: the closest point on the line.
+  let best = candidates[0]
+  for (const c of candidates) if (c.d < best.d) best = c
+  if (anchorKm == null) {
+    return {
+      index: best.index,
+      snapped: best.point,
+      alongKm: best.along,
+      offRouteM: best.d * 1000,
+    }
+  }
+
+  // Then the question continuity is allowed to answer: is there a rival that
+  // fits the ground just as well but sits somewhere else entirely along the
+  // route? Only somewhere *else* — a candidate a few metres up the same
+  // stretch is not a second opinion about which leg you are on, and letting it
+  // win would drag the projection backwards along the road for nothing.
+  const limit = nearest + SAME_GROUND_M / 1000
+  let rival = best
+  for (const c of candidates) {
+    if (c.d > limit) continue
+    if (Math.abs(c.along - best.along) < ELSEWHERE_KM) continue
+    if (Math.abs(c.along - anchorKm) < Math.abs(rival.along - anchorKm)) rival = c
+  }
+  if (Math.abs(rival.along - anchorKm) < Math.abs(best.along - anchorKm)) best = rival
+
   return {
-    index: bestIndex,
-    snapped: bestPoint,
-    alongKm: bestAlong,
-    offRouteM: bestDist * 1000,
+    index: best.index,
+    snapped: best.point,
+    alongKm: best.along,
+    offRouteM: best.d * 1000,
   }
 }
 

@@ -210,3 +210,65 @@ describe('trimming the way back', () => {
     expect(trimmed.coordinates).toHaveLength(3)
   })
 })
+
+/**
+ * On a path walked in both directions — an out-and-back, or the stick of a
+ * lollipop — standing anywhere puts you at two places along the route at once:
+ * a hundred metres out and, on the same paving stone, six hundred metres on
+ * the way home. Both fit the reading perfectly, so which came out nearest was
+ * settled by whether the router laid its vertices in quite the same spots on
+ * the way back. It does not, and losing that toss meant being told you were
+ * heading home before you had reached the turnaround.
+ */
+describe('which leg of a there-and-back you are on', () => {
+  // Out 400 m and back, the return leg sampled a little differently — which
+  // is what BRouter actually hands back.
+  const outAndBack = () => {
+    const up: LngLat[] = []
+    for (let m = 0; m <= 400; m += 20) up.push(offset(ORIGIN, 0, m))
+    const down: LngLat[] = []
+    for (let m = 390; m >= 0; m -= 20) down.push(offset(ORIGIN, 0.3, m))
+    return prepareRoute({
+      geometry: { type: 'LineString', coordinates: [...up, ...down] },
+      distanceKm: 0.8,
+      durationSec: 0,
+      voicehints: [],
+    })
+  }
+
+  it('keeps you on the way out until you have turned round', () => {
+    const p = outAndBack()
+    const at350 = offset(ORIGIN, 0.2, 350)
+    const believedAt = (km: number) =>
+      p.cumulative.findIndex((c) => c >= km)
+
+    const fix = locateOnRoute(p, at350, believedAt(0.33))
+
+    expect(fix.alongKm).toBeLessThan(p.totalKm / 2)
+    expect(fix.alongKm).toBeCloseTo(0.35, 1)
+  })
+
+  it('and on the way home once you have', () => {
+    const p = outAndBack()
+    const at350 = offset(ORIGIN, 0.2, 350)
+
+    // Same paving stone, but we were last seen past the turnaround.
+    const fix = locateOnRoute(p, at350, p.cumulative.findIndex((c) => c >= 0.43))
+
+    expect(fix.alongKm).toBeGreaterThan(p.totalKm / 2)
+  })
+
+  // The tie-break is only allowed to choose between readings that are somewhere
+  // else entirely. A candidate a few metres up the same stretch is not a second
+  // opinion about which leg you are on, and letting it win would drag the
+  // projection back down the road for nothing.
+  it('does not drag the projection backwards along the leg it picked', () => {
+    const p = outAndBack()
+    const beside = offset(ORIGIN, 7, 200)
+
+    const fix = locateOnRoute(p, beside, p.cumulative.findIndex((c) => c >= 0.19))
+
+    expect(fix.alongKm).toBeCloseTo(0.2, 2)
+    expect(fix.offRouteM).toBeLessThan(8)
+  })
+})
