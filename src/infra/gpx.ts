@@ -62,13 +62,23 @@ export function canShareGpx() {
  *
  * Must be called straight from the tap: iOS refuses a share that arrives after
  * an await, so the file is built synchronously before anything is asked for.
+ *
+ * `files` and nothing else. Adding a `title` alongside it is the documented way
+ * to lose the very apps this exists for: iOS then treats the share as a title
+ * carrying an attachment rather than as a file, and the route apps — which
+ * registered themselves against the GPX type and not against text — never come
+ * up as targets. The sheet still opens, which is what makes it look like it
+ * worked. Reported from the phone: Save to Files and AirDrop, no Komoot, no
+ * Bosch Flow. Nothing is lost by dropping it: the walk names itself twice over,
+ * in the filename and in the GPX's own `<name>`, which is the one the route
+ * apps actually read.
  */
 export async function shareGpx(route: Route, kind: string) {
   const gpx = gpxDocument(route, kind)
   if (canShareGpx()) {
     const file = new File([gpx], fileName(route), { type: GPX_TYPE })
     try {
-      await navigator.share({ files: [file], title: trackName(route, kind) })
+      await navigator.share({ files: [file] })
       return
     } catch (err) {
       // Closing the sheet is an answer. Posting the file to Downloads as a

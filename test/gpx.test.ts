@@ -67,17 +67,32 @@ describe('handing the route to the phone', () => {
   })
 
   it('offers the file to the share sheet where there is one', async () => {
-    const share = vi.fn(async (_data: { files?: File[]; title?: string }) => {})
+    const share = vi.fn(async (_data: { files?: File[] }) => {})
     const { shareGpx, canShareGpx, downloads } = await withBrowser(share)
 
     expect(canShareGpx()).toBe(true)
     await shareGpx(loop, 'walk')
 
-    const [{ files, title }] = share.mock.calls[0]
+    const [{ files }] = share.mock.calls[0]
     expect(files![0].name).toBe('meguri-5.2km.gpx')
     expect(files![0].type).toBe('application/gpx+xml')
-    expect(title).toBe('Meguri walk — 5.2 km')
     expect(downloads).toEqual([]) // the sheet has it; nothing to drop
+  })
+
+  /**
+   * Reported from the phone: the sheet opened, but Komoot and Bosch Flow were
+   * not in it — only Save to Files and AirDrop. On iOS a share carrying
+   * anything besides `files` is treated as that other thing with an attachment,
+   * and the apps that registered against the GPX type never match. The sheet
+   * still opens, which is exactly what makes it look like it worked.
+   */
+  it('hands over the file and nothing else, or the route apps do not appear', async () => {
+    const share = vi.fn(async (_data: { files?: File[] }) => {})
+    const { shareGpx } = await withBrowser(share)
+
+    await shareGpx(loop, 'walk')
+
+    expect(Object.keys(share.mock.calls[0][0])).toEqual(['files'])
   })
 
   // Closing the sheet is an answer. Posting the file to Downloads anyway
