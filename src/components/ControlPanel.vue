@@ -13,7 +13,7 @@ import {
   clearWaypoints,
   removeWaypoint,
 } from '../app/store'
-import { downloadGpx } from '../infra/gpx'
+import { shareGpx, canShareGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
 import { primeSpeech } from '../app/guidance'
 import { checkForUpdates } from '../infra/pwa'
@@ -24,6 +24,9 @@ import { useBottomSheet } from '../composables/useBottomSheet'
 import { usePlaceSearch } from '../composables/usePlaceSearch'
 
 const { query, results, searching, listOpen, reset: resetSearch } = usePlaceSearch()
+
+// A property of the browser, not of anything reactive: read it once.
+const sharesGpx = canShareGpx()
 const {
   collapsed,
   panelEl,
@@ -455,8 +458,15 @@ const routeStats = computed(() => {
             </svg>
             {{ t('surpriseMe') }}
           </button>
-          <button class="ghost-btn" @click="downloadGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk'))">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
+          <!-- Share sheet where there is one — that is how the loop reaches a
+               watch, a head unit, or another route app — and a plain download
+               where there isn't. The glyph says which, so the button does not
+               promise a download and open a sheet. -->
+          <button class="ghost-btn" @click="shareGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk'))">
+            <svg v-if="sharesGpx" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v6.5h14V13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             {{ t('gpx') }}
