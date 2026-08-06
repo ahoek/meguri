@@ -72,25 +72,26 @@ describe('trimming out-and-back spurs', () => {
 })
 
 describe('scoring loop candidates', () => {
-  // Backtracking weighs heavier than missing the target length: a loop half
-  // a kilometre long-of-target must still beat an exact one that rides the
-  // same road twice.
+  // Backtracking weighs heavier than missing the target length: a loop some
+  // way long of target must still beat an exact one that rides the same road
+  // twice — within reason, since past the tolerance the length floor takes
+  // over and no amount of cleanliness excuses a walk half again as long.
   it('prefers a clean loop over an exact one that doubles back', async () => {
     const a = ORIGIN
     const b = offset(a, 0, 200)
     // Runs the a–b road in both directions (~16% of its length doubled),
     // but its reported length matches the 1 km target exactly.
     const doubled = [a, b, offset(b, 300, 0), offset(a, 300, 0), b, a]
-    // No doubling, but half a kilometre over target.
+    // No doubling, and 12% over target.
     const clean = [a, offset(a, 0, 300), offset(a, 300, 300), offset(a, 300, 0), a]
 
     let call = 0
     const route = await loopWith(async () =>
-      call++ === 0 ? routeOf(doubled, 1000) : routeOf(clean, 1500),
+      call++ === 0 ? routeOf(doubled, 1000) : routeOf(clean, 1120),
     )
 
     expect(route.geometry.coordinates).toHaveLength(clean.length)
-    expect(route.distanceKm).toBeCloseTo(1.5)
+    expect(route.distanceKm).toBeCloseTo(1.12)
   })
 
   /**
@@ -161,6 +162,62 @@ describe('scoring loop candidates', () => {
   })
 
   /**
+   * Measured on a 4 km ask: an 80%-green loop of 3.2 km beat greyer
+   * full-length candidates — the length promise was being outbid by the very
+   * greenness the app was tuned for. However green the walk, it is not the
+   * walk that was asked for.
+   */
+  it('will not trade the promised length away for greenness', async () => {
+    const a = ORIGIN
+    const short = [a, offset(a, 0, 200), offset(a, 200, 200), offset(a, 200, 0), a]
+    const full = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    const green = (coords: LngLat[], lengthM: number, fraction: number) => ({
+      ...routeOf(coords, lengthM),
+      greenFraction: fraction,
+      greenMask: coords.slice(1).map(() => fraction > 0.5),
+    })
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 4,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      routeThrough: async () =>
+        call++ === 0 ? green(short, 3200, 0.8) : green(full, 4000, 0.2),
+    })
+
+    expect(route.distanceKm).toBeCloseTo(4)
+  })
+
+  // Inside the tolerance the trade still stands: a slightly-off green loop
+  // beats an exact grey one, which is the choice the green weight exists for.
+  it('still lets green win a rounding error in length', async () => {
+    const a = ORIGIN
+    const nearly = [a, offset(a, 0, 200), offset(a, 200, 200), offset(a, 200, 0), a]
+    const exact = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    const dressed = (coords: LngLat[], lengthM: number, fraction: number) => ({
+      ...routeOf(coords, lengthM),
+      greenFraction: fraction,
+      greenMask: coords.slice(1).map(() => fraction > 0.5),
+    })
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 4,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      routeThrough: async () =>
+        call++ === 0 ? dressed(nearly, 3750, 0.8) : dressed(exact, 4000, 0.1),
+    })
+
+    expect(route.greenFraction).toBe(0.8)
+  })
+
+  /**
    * Reported from Rotterdam: a loop threaded a shopping block along a mapped
    * passage that does not exist on the street. The router cannot know, but
    * the map's building footprints can — so a candidate that runs through a
@@ -227,9 +284,9 @@ describe('scoring loop candidates', () => {
       bearing: 0,
       clockwise: true,
       preferGreen: true,
-      // Doubled is exactly on target; clean is half a kilometre over. With no
-      // mask the doubling costs full price and clean must still win.
-      routeThrough: async () => (call++ === 0 ? routeOf(doubled, 1000) : routeOf(clean, 1500)),
+      // Doubled is exactly on target; clean is 12% over. With no mask the
+      // doubling costs full price and clean must still win.
+      routeThrough: async () => (call++ === 0 ? routeOf(doubled, 1000) : routeOf(clean, 1120)),
     })
 
     expect(route.geometry.coordinates).toHaveLength(clean.length)

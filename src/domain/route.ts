@@ -39,6 +39,21 @@ export type Profile = 'walk' | 'bike'
 const GREEN_WEIGHT = 0.35
 
 /**
+ * The length promise, enforced.
+ *
+ * Inside the tolerance, distance error is a tie-breaker like any other. Past
+ * it, the error is charged steeply — because the linear term alone let green
+ * outbid length: measured on a 4 km ask, an 80%-green loop of 3.2 km beat
+ * greyer full-length candidates, its 0.2 length penalty cheaper than the 0.35
+ * the greenness earned. However green the walk, it is not the walk that was
+ * asked for. Ten percent, not the 6% that stops the search early: candidates
+ * between the two are imperfect but honest answers, and somewhere has to
+ * absorb the granularity of real street blocks.
+ */
+const LENGTH_TOLERANCE = 0.1
+const LENGTH_EXCESS_WEIGHT = 10
+
+/**
  * What doubling back costs, by the ground it happens on.
  *
  * Walking the same street twice annoys more than a kilometre missing, so
@@ -63,13 +78,13 @@ const GREEN_OVERLAP_WEIGHT = 1.5
  * OSM sometimes knows a way that is not there — a passage mapped through a
  * block that was rebuilt. The router cannot tell, but the map's own building
  * footprints can, so a candidate that threads one loses to any candidate that
- * does not: below a missed stop, above everything else, because "the path
- * does not exist" outranks every preference about the paths that do. A few
- * metres are forgiven — footprints are tile geometry, and a route hugging a
- * facade grazes them without being wrong.
+ * does not: below a missed stop, above everything else — including a badly
+ * missed length, since a walk that is too long is still a walk, and one sent
+ * through a wall is not. A few metres are forgiven — footprints are tile
+ * geometry, and a route hugging a facade grazes them without being wrong.
  */
 const BUILDING_FORGIVEN_M = 12
-const BUILDING_PENALTY = 2
+const BUILDING_PENALTY = 10
 // Among candidates that all cross somewhere, prefer the one that crosses least.
 const BUILDING_PER_KM = 5
 // Green enough to stop looking for something greener.
@@ -422,10 +437,13 @@ export async function generateLoop({
         ? BUILDING_PENALTY + (throughM / 1000) * BUILDING_PER_KM
         : 0
 
+    const lengthScore =
+      distErr + Math.max(0, distErr - LENGTH_TOLERANCE) * LENGTH_EXCESS_WEIGHT
+
     const score =
       missed * 100 +
       buildingScore +
-      distErr +
+      lengthScore +
       greyOverlap * OVERLAP_WEIGHT +
       greenOverlap * GREEN_OVERLAP_WEIGHT +
       greenScore
