@@ -119,6 +119,14 @@ function fitPadding() {
  */
 function navPadding() {
   const height = container.value?.clientHeight ?? window.innerHeight
+  const width = container.value?.clientWidth ?? window.innerWidth
+  // A phone on its side: the arrow keeps the screen's centre — the chrome
+  // stands in a column to its left and stays out of the way — but the
+  // portrait sums are poison here, since 40% plus two dashboards of a 390px
+  // screen is more padding than there is screen.
+  if (width > height && height < 500) {
+    return { top: Math.round(height * 0.35), bottom: 30, left: 0, right: 0 }
+  }
   const dash = 150
   return { top: Math.round(height * 0.4) + dash, bottom: dash, left: 0, right: 0 }
 }
@@ -350,9 +358,31 @@ onMounted(() => {
 
   // The container can be laid out after map init (style injection timing),
   // so track its size ourselves.
+  //
+  // A rotation is also a resize, and it moves where the panel sits — from a
+  // sheet along the bottom to a sidebar along the left — so a fitted route is
+  // suddenly framed for the wrong strip of screen. The inset watcher below
+  // cannot fix that reliably: it fires while the canvas still has its old
+  // dimensions, and the map.resize() that follows re-centres over its work.
+  // So the refit happens here, after the resize, debounced so a rotation's
+  // flurry of layout steps produces one fit rather than a fight.
+  let refitTimer: ReturnType<typeof setTimeout> | undefined
   resizeObserver = new ResizeObserver(() => {
     map.resize()
-    if (nav.active) camera.refreshPadding(navPadding())
+    if (nav.active) {
+      camera.refreshPadding(navPadding())
+      return
+    }
+    if (!store.route) return
+    clearTimeout(refitTimer)
+    refitTimer = setTimeout(() => {
+      if (nav.active || !store.route || !layers.ready()) return
+      map.fitBounds(layers.boundsOf(store.route.geometry.coordinates), {
+        padding: fitPadding(),
+        pitch: 0,
+        duration: 400,
+      })
+    }, 150)
   })
   resizeObserver.observe(container.value!)
 
