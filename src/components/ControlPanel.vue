@@ -565,9 +565,13 @@ const routeStats = computed(() => {
        itself only occupies the last few pixels, so keep a margin and give the
        rest of the inset back to the map. */
     --handle-pad: max(0px, calc(env(safe-area-inset-bottom, 0px) - 22px));
-    /* Nothing but a pull tab, until a route puts its figures and a start
-       button in the strip too. */
-    --handle-strip: 30px;
+    /* A pull tab, until a route puts its figures and a start button in the
+       strip too — but a *grabbable* one: at 30px flush with the glass it sat
+       entirely inside the band iOS reserves for the home swipe, so pulling
+       the sheet up dragged the app switcher up instead. 44px is the minimum
+       a thumb is owed, and the lift below moves it clear of the system's
+       strip rather than fighting it for the same pixels. */
+    --handle-strip: 44px;
     left: 0;
     right: 0;
     bottom: 0;
@@ -588,13 +592,12 @@ const routeStats = computed(() => {
      for the home swipe — so half the taps that missed weren't the user's. */
   .panel:has(.mini-start) {
     --handle-strip: 66px;
-    /* Lift the strip clear of the bottom edge, on top of whatever the home
-       indicator already asks for. */
-    --handle-lift: 10px;
   }
 
   .panel {
-    --handle-lift: 0px;
+    /* Every collapsed strip gets the lift, not only the one carrying the
+       start button: the home-swipe conflict never depended on a route. */
+    --handle-lift: 10px;
     --handle-h: calc(var(--handle-strip) + var(--handle-pad) + var(--handle-lift));
   }
 
