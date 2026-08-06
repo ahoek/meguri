@@ -32,9 +32,9 @@ const {
   panelEl,
   sheetTopEl,
   isMobile,
-  onHandleTouchStart,
-  onHandleTouchMove,
-  onHandleTouchEnd,
+  onSheetTouchStart,
+  onSheetTouchMove,
+  onSheetTouchEnd,
 } = useBottomSheet()
 
 watch(
@@ -192,17 +192,25 @@ const routeStats = computed(() => {
     </div>
   </Transition>
 
-  <section ref="panelEl" class="panel" :class="{ collapsed }" aria-label="Route planner">
+  <!-- The whole sheet is the drag surface; the composable arbitrates between
+       moving the sheet and scrolling its body. touchmove is deliberately
+       non-passive — a claimed drag has to preventDefault the scroll. -->
+  <section
+    ref="panelEl"
+    class="panel"
+    :class="{ collapsed }"
+    aria-label="Route planner"
+    @touchstart.passive="onSheetTouchStart"
+    @touchmove="onSheetTouchMove"
+    @touchend="onSheetTouchEnd"
+    @touchcancel="onSheetTouchEnd"
+  >
     <div ref="sheetTopEl" class="sheet-top">
       <button
         class="sheet-handle"
         :aria-expanded="!collapsed"
         :aria-label="t('panelToggle')"
         @click="collapsed = !collapsed"
-        @touchstart.passive="onHandleTouchStart"
-        @touchmove.passive="onHandleTouchMove"
-        @touchend="onHandleTouchEnd"
-        @touchcancel="onHandleTouchEnd"
       >
         <span class="grabber" aria-hidden="true"></span>
         <span v-if="collapsed && routeStats" class="mini-stats">
