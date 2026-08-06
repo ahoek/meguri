@@ -437,12 +437,18 @@ onMounted(() => {
     () => store.flyTo,
     (target) => {
       if (!target) return
+      // Land centred in the part of the map you can actually see: above the
+      // sheet on a phone, and to the right of the sidebar on anything wide —
+      // sheetInset is zero there, and without the horizontal shove the dot
+      // arrived at the viewport's centre, tucked against the panel's edge.
+      const mobile = matchMedia('(max-width: 760px)').matches
       map.flyTo({
         center: target.center as [number, number],
         zoom: target.zoom,
         duration: 1400,
-        // Land centred in the strip the sheet leaves visible.
-        offset: [0, -store.sheetInset / 2],
+        // Half the sidebar's footprint (400px panel + 20px margin), matching
+        // fitPadding's idea of where the map begins.
+        offset: mobile ? [0, -store.sheetInset / 2] : [210, 0],
       })
     },
   )
