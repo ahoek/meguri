@@ -544,8 +544,19 @@ const routeStats = computed(() => {
     left: 20px;
     width: 400px;
     max-height: calc(100dvh - 40px);
-    overflow-y: auto;
+    /* The body scrolls, never the panel. The glass backdrop is an absolutely
+       positioned ::before, and inside a scrolling container that only covers
+       the first viewport of content and rides away with it — which is how a
+       landscape phone (wider than the mobile breakpoint, shorter than the
+       panel) showed the sheet's lower half floating transparent on the map. */
+    overflow: hidden;
     border-radius: var(--radius);
+  }
+
+  .sheet-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 
