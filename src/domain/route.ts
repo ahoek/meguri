@@ -61,7 +61,14 @@ const GREEN_ENOUGH = 0.55
 // How many directions to try before accepting a loop that fits but is grey.
 // A cap, not a target: somewhere with no green at all must not spend every
 // attempt discovering that, on infrastructure shared with everyone else.
-const GREEN_SEARCH_ATTEMPTS = 3
+//
+// Five, not three. Measured from the middle of a street grid with a large
+// wood 1.5 km away: grey loops fit on the first attempt in most directions,
+// so at three the sweep had covered barely a quarter turn before settling —
+// and sent a 7 km walk east through more grid while the wood sat due west.
+// Five buys ±106° around the opening bearing, most of the compass, for at
+// most two more routing calls in exactly the places that fit too easily.
+const GREEN_SEARCH_ATTEMPTS = 5
 // Rotating by roughly a seventh of the compass each time covers new ground
 // rather than nudging into the same terrain.
 const GREEN_SEARCH_TURN = 53
