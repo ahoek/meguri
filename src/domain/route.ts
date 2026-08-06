@@ -56,6 +56,22 @@ const GREEN_WEIGHT = 0.35
  */
 const OVERLAP_WEIGHT = 4
 const GREEN_OVERLAP_WEIGHT = 1.5
+
+/**
+ * A route through a building is a route through wrong data.
+ *
+ * OSM sometimes knows a way that is not there — a passage mapped through a
+ * block that was rebuilt. The router cannot tell, but the map's own building
+ * footprints can, so a candidate that threads one loses to any candidate that
+ * does not: below a missed stop, above everything else, because "the path
+ * does not exist" outranks every preference about the paths that do. A few
+ * metres are forgiven — footprints are tile geometry, and a route hugging a
+ * facade grazes them without being wrong.
+ */
+const BUILDING_FORGIVEN_M = 12
+const BUILDING_PENALTY = 2
+// Among candidates that all cross somewhere, prefer the one that crosses least.
+const BUILDING_PER_KM = 5
 // Green enough to stop looking for something greener.
 const GREEN_ENOUGH = 0.55
 // How many directions to try before accepting a loop that fits but is grey.
@@ -276,6 +292,7 @@ export async function generateLoop({
   waypoints = [],
   preferGreen = false,
   nudgeVia,
+  metresThroughBuildings,
   routeThrough,
 }: {
   start: LngLat
@@ -296,6 +313,12 @@ export async function generateLoop({
    * are and the domain does not talk to the map.
    */
   nudgeVia?: (point: LngLat, maxMoveM: number) => LngLat | null
+  /**
+   * Metres of a track that run through buildings, or null when the map has no
+   * footprints loaded to say. Injected like `nudgeVia`, and for the same
+   * reason: only the map has the polygons.
+   */
+  metresThroughBuildings?: (coords: LngLat[]) => number | null
   routeThrough: RouteThrough
 }): Promise<Route> {
   let radius = Math.max(0.12, targetKm / (2 * Math.PI))
@@ -392,8 +415,16 @@ export async function generateLoop({
     const green = preferGreen ? route.greenFraction : null
     const greenScore = typeof green === 'number' ? (1 - green) * GREEN_WEIGHT : 0
     const greyOverlap = overlap - greenOverlap
+
+    const throughM = metresThroughBuildings?.(route.geometry.coordinates) ?? 0
+    const buildingScore =
+      throughM > BUILDING_FORGIVEN_M
+        ? BUILDING_PENALTY + (throughM / 1000) * BUILDING_PER_KM
+        : 0
+
     const score =
       missed * 100 +
+      buildingScore +
       distErr +
       greyOverlap * OVERLAP_WEIGHT +
       greenOverlap * GREEN_OVERLAP_WEIGHT +
@@ -423,7 +454,11 @@ export async function generateLoop({
     // a random one. Now a fitting-but-grey loop buys a few more directions
     // before we settle, and a fitting green one still stops immediately.
     const fits =
-      !missed && distErr < 0.06 && feltOverlap < 0.08 && overlap < OVERLAP_CEILING
+      !missed &&
+      !buildingScore &&
+      distErr < 0.06 &&
+      feltOverlap < 0.08 &&
+      overlap < OVERLAP_CEILING
     const greenEnough = green == null || green >= GREEN_ENOUGH
     if (fits && (greenEnough || attempt >= GREEN_SEARCH_ATTEMPTS)) break
     // With nothing left to remove, over-target means the waypoints themselves

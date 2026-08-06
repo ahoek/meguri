@@ -160,6 +160,58 @@ describe('scoring loop candidates', () => {
     expect(route.geometry.coordinates).toHaveLength(clean.length)
   })
 
+  /**
+   * Reported from Rotterdam: a loop threaded a shopping block along a mapped
+   * passage that does not exist on the street. The router cannot know, but
+   * the map's building footprints can — so a candidate that runs through a
+   * building loses to any candidate that does not, even one further off the
+   * target length.
+   */
+  it('keeps out of buildings when the map can tell it where they are', async () => {
+    const a = ORIGIN
+    // On target, but 100 m of it runs through a building.
+    const through = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    // Clear of buildings, half a kilometre over.
+    const around = [a, offset(a, 0, 400), offset(a, 400, 400), offset(a, 400, 0), a]
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      metresThroughBuildings: (coords) => (coords === through ? 100 : 0),
+      routeThrough: async () =>
+        call++ === 0 ? routeOf(through, 1000) : routeOf(around, 1500),
+    })
+
+    expect(route.distanceKm).toBeCloseTo(1.5)
+  })
+
+  // Footprints are tile geometry; a route hugging a facade grazes them
+  // without being wrong. A few metres must not veto an otherwise good loop.
+  it('forgives a graze along a facade', async () => {
+    const a = ORIGIN
+    const graze = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    const clear = [a, offset(a, 0, 400), offset(a, 400, 400), offset(a, 400, 0), a]
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      metresThroughBuildings: (coords) => (coords === graze ? 8 : 0),
+      routeThrough: async () =>
+        call++ === 0 ? routeOf(graze, 1000) : routeOf(clear, 1500),
+    })
+
+    // The grazing loop fits and is accepted; the detour is never even fetched.
+    expect(route.distanceKm).toBeCloseTo(1)
+  })
+
   // Without the router's land-cover estimate there is no mask, and repeated
   // ground must be priced at the full rate — "not measured" is not "woodland".
   it('gives no discount when the router never said what the ground was', async () => {

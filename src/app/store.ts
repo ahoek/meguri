@@ -227,6 +227,14 @@ export function setGreenNudger(fn: NudgeVia) {
   nudgeViaToGreen = fn
 }
 
+/** Same arrangement for the building footprints — see `metresThroughBuildings`. */
+type BuildingMeter = (coords: LngLat[]) => number | null
+let buildingMeter: BuildingMeter = () => null
+
+export function setBuildingMeter(fn: BuildingMeter) {
+  buildingMeter = fn
+}
+
 let flyId = 0
 let abortController: AbortController | null = null
 let errorTimer: ReturnType<typeof setTimeout> | undefined
@@ -377,6 +385,7 @@ export async function generate({ shuffle = false } = {}) {
       // Only hunt for green if green was asked for.
       preferGreen: nature,
       nudgeVia: nature ? nudgeViaToGreen : undefined,
+      metresThroughBuildings: nature ? buildingMeter : undefined,
       routeThrough: (points) => fetchRoute(points, mode, nature, signal),
     })
   } catch (err) {
