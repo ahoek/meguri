@@ -30,6 +30,8 @@ interface Store {
   clockwise: boolean
   sheetInset: number
   bannerInset: number
+  /** The map's live bearing, for chrome that shows which way north is. */
+  mapBearing: number
   waypoints: LngLat[]
   waypointMode: boolean
 }
@@ -142,6 +144,7 @@ export const store = reactive<Store>({
   error: '',
   flyTo: null, // { center, zoom, id } — MapView watches this
   sheetInset: 0, // px of viewport covered by the mobile sheet; MapView pads around it
+  mapBearing: 0,
   bannerInset: 0, // px covered by the navigation banner; the map's controls duck under it
   waypoints: loadWaypoints(), // [lng, lat][] the loop must pass through
   waypointMode: false, // map taps add waypoints instead of moving the start

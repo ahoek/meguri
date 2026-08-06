@@ -386,6 +386,12 @@ onMounted(() => {
   })
   resizeObserver.observe(container.value!)
 
+  // Which way is north on screen, for the compass chrome. 'rotate' fires per
+  // eased frame while turning and stays silent otherwise, so this is cheap.
+  map.on('rotate', () => {
+    store.mapBearing = map.getBearing()
+  })
+
   map.on('load', () => {
     styleTweaks.softenExtrusions()
     styleTweaks.clarifyWays(store.mode)

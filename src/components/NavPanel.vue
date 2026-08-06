@@ -237,6 +237,18 @@ const standalone =
 const compassDismissed = ref(false)
 watch(compassStatus, () => (compassDismissed.value = false))
 
+/**
+ * The recenter button doubles as a compass while one is actually steering:
+ * walking, permission granted, readings coming in. The map turns with your
+ * wrist there, so "which way is north" is a question the screen keeps
+ * re-asking — the needle answers it, and the tap still recentres. On a bike
+ * (or with the compass refused) the map's bearing means something else, and
+ * the plain crosshair stays.
+ */
+const showCompass = computed(
+  () => usingCompass() && compassStatus.value === 'live',
+)
+
 const compassProblem = computed(() => {
   if (!usingCompass()) return null
   switch (compassStatus.value) {
@@ -466,7 +478,24 @@ const progress = computed(() => {
         :title="t('navRecenter')"
         @click="emit('recenter')"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
+        <!-- With a live compass the button is one: the needle tracks the
+             map's real bearing, red end to north. No transition — updates
+             arrive per frame while the map turns, and easing a wrapped angle
+             spins the long way round at the ±180 seam. -->
+        <!-- The needle is the icon: it fills the button, and the ring is a
+             faint suggestion of a bezel rather than a competing shape — at
+             23px, anything the needle cedes to decoration it cannot spare. -->
+        <svg v-if="showCompass" class="compass" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10.6" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.35" />
+          <g :style="{ transform: `rotate(${-store.mapBearing}deg)`, transformOrigin: '12px 12px' }">
+            <path d="M12 2.4 15.4 12 12 12z" fill="#f87171" />
+            <path d="M12 2.4 8.6 12 12 12z" fill="#ef4444" />
+            <path d="M12 21.6 15.4 12 12 12z" fill="currentColor" opacity="0.55" />
+            <path d="M12 21.6 8.6 12 12 12z" fill="currentColor" opacity="0.85" />
+          </g>
+          <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="3.2" fill="currentColor" />
           <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2" />
           <path d="M12 1.5v3.5M12 19v3.5M22.5 12H19M5 12H1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -933,6 +962,14 @@ const progress = computed(() => {
 .round-btn svg {
   width: 23px;
   height: 23px;
+}
+
+/* A glyph sits inside its button; a compass IS its button. At the shared
+   23px the face floated in the middle of a 50px circle like a trinket, so
+   this one icon grows until its bezel nearly meets the button's own edge. */
+.round-btn svg.compass {
+  width: 38px;
+  height: 38px;
 }
 
 .exit-btn {
