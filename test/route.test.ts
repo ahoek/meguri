@@ -162,12 +162,11 @@ describe('scoring loop candidates', () => {
   })
 
   /**
-   * Measured on a 4 km ask: an 80%-green loop of 3.2 km beat greyer
-   * full-length candidates — the length promise was being outbid by the very
-   * greenness the app was tuned for. However green the walk, it is not the
-   * walk that was asked for.
+   * "I don't mind a shorter or longer route if it's nicer" — with nature on,
+   * length and greenness trade openly inside a widened tolerance, so a walk
+   * fifteen percent short but four times as green wins.
    */
-  it('will not trade the promised length away for greenness', async () => {
+  it('lets a clearly nicer walk run somewhat short when nature is on', async () => {
     const a = ORIGIN
     const short = [a, offset(a, 0, 200), offset(a, 200, 200), offset(a, 200, 0), a]
     const full = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
@@ -185,7 +184,33 @@ describe('scoring loop candidates', () => {
       clockwise: true,
       preferGreen: true,
       routeThrough: async () =>
-        call++ === 0 ? green(short, 3200, 0.8) : green(full, 4000, 0.2),
+        call++ === 0 ? green(short, 3400, 0.8) : green(full, 4000, 0.2),
+    })
+
+    expect(route.greenFraction).toBe(0.8)
+  })
+
+  // "Somewhat shorter" was the offer. Half the walk missing is not, and no
+  // greenness pays for it.
+  it('will not accept a fraction of the promised walk however green', async () => {
+    const a = ORIGIN
+    const stub = [a, offset(a, 0, 150), offset(a, 150, 150), offset(a, 150, 0), a]
+    const full = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    const green = (coords: LngLat[], lengthM: number, fraction: number) => ({
+      ...routeOf(coords, lengthM),
+      greenFraction: fraction,
+      greenMask: coords.slice(1).map(() => fraction > 0.5),
+    })
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 4,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      routeThrough: async () =>
+        call++ === 0 ? green(stub, 2400, 0.9) : green(full, 4000, 0.15),
     })
 
     expect(route.distanceKm).toBeCloseTo(4)

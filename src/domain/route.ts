@@ -49,8 +49,15 @@ const GREEN_WEIGHT = 0.35
  * asked for. Ten percent, not the 6% that stops the search early: candidates
  * between the two are imperfect but honest answers, and somewhere has to
  * absorb the granularity of real street blocks.
+ *
+ * With nature on the tolerance doubles, on the user's own instruction: "I
+ * don't mind a shorter or longer route if it's nicer." Inside that wider band
+ * greenness and length trade openly at their linear weights — a clearly nicer
+ * walk may run fifteen percent short and win. The floor past the band stays,
+ * because "somewhat shorter" was the offer and half the walk missing is not.
  */
 const LENGTH_TOLERANCE = 0.1
+const GREEN_LENGTH_TOLERANCE = 0.2
 const LENGTH_EXCESS_WEIGHT = 10
 
 /**
@@ -103,6 +110,17 @@ const GREEN_SEARCH_ATTEMPTS = 5
 // Rotating by roughly a seventh of the compass each time covers new ground
 // rather than nudging into the same terrain.
 const GREEN_SEARCH_TURN = 53
+/**
+ * When the sweep has seen the whole compass and still found nothing green
+ * enough, the problem is usually reach, not direction: the green is real but
+ * sits beyond the circle, which for a 4 km walk ends 1.3 km out in every
+ * direction. So the remaining attempts stretch the loop into an ellipse along
+ * the greenest bearing the sweep measured — same walking length, further
+ * reach, narrower across. Two steps of 0.3: past 1.6 the two long sides pinch
+ * onto the same streets and the overlap penalty rejects what the stretch won.
+ */
+const GREEN_STRETCH_STEP = 0.3
+const GREEN_STRETCH_MAX = 1.6
 // How far a via point may be dragged off its circle, as a share of the radius.
 // Measured: 0.9 pulled hard enough to break the length promise outright — a 2 km
 // ask came back 0.92 km and 2.47 km — so the ceiling here is not squeamishness,
@@ -341,6 +359,8 @@ export async function generateLoop({
   let viaCount = 4
   let greenTries = 0
   let bestGreen = 0
+  let bestGreenBearing: number | null = null
+  let stretch = 1
   const searchingGreen = preferGreen && !waypoints.length
   let best: Route | null = null
   let bestScore = Infinity
@@ -349,7 +369,7 @@ export async function generateLoop({
   for (let attempt = 0; attempt < 7; attempt++) {
     const circle = waypoints.length
       ? loopViaWithWaypoints(start, waypoints, radius, currentBearing, clockwise, viaCount)
-      : loopViaPoints(start, radius, currentBearing, clockwise, viaCount)
+      : loopViaPoints(start, radius, currentBearing, clockwise, viaCount, stretch)
 
     // The circle sets the length and keeps the legs apart; it was never meant to
     // be walked exactly. Pull each point onto nearby green and the router threads
@@ -437,8 +457,9 @@ export async function generateLoop({
         ? BUILDING_PENALTY + (throughM / 1000) * BUILDING_PER_KM
         : 0
 
+    const tolerance = preferGreen ? GREEN_LENGTH_TOLERANCE : LENGTH_TOLERANCE
     const lengthScore =
-      distErr + Math.max(0, distErr - LENGTH_TOLERANCE) * LENGTH_EXCESS_WEIGHT
+      distErr + Math.max(0, distErr - tolerance) * LENGTH_EXCESS_WEIGHT
 
     const score =
       missed * 100 +
@@ -452,7 +473,10 @@ export async function generateLoop({
       best = route
       bestScore = score
     }
-    if (typeof green === 'number') bestGreen = Math.max(bestGreen, green)
+    if (typeof green === 'number' && green >= bestGreen) {
+      bestGreen = green
+      bestGreenBearing = currentBearing
+    }
 
     // The overlap the thresholds below judge, priced like the score: repeated
     // green counts at the discount. Without this, a park loop carrying a bit
@@ -478,7 +502,12 @@ export async function generateLoop({
       feltOverlap < 0.08 &&
       overlap < OVERLAP_CEILING
     const greenEnough = green == null || green >= GREEN_ENOUGH
-    if (fits && (greenEnough || attempt >= GREEN_SEARCH_ATTEMPTS)) break
+    // A fitting grey loop only ends the search once the stretched attempts
+    // have had their turn too — the sweep answers "which direction", the
+    // stretch answers "further than the circle can go", and settling before
+    // both have spoken is how a walk from a street grid stayed grey with a
+    // wood twenty minutes away.
+    if (fits && (greenEnough || stretch >= GREEN_STRETCH_MAX)) break
     // With nothing left to remove, over-target means the waypoints themselves
     // demand the distance — a clean loop through them is as good as it gets.
     if (
@@ -504,8 +533,14 @@ export async function generateLoop({
     // below keeps working across them.
     if (searchingGreen && bestGreen < GREEN_ENOUGH && !waypoints.length) {
       greenTries += 1
-      const side = greenTries % 2 === 1 ? -1 : 1
-      currentBearing = bearing + side * Math.ceil(greenTries / 2) * GREEN_SEARCH_TURN
+      if (greenTries <= GREEN_SEARCH_ATTEMPTS) {
+        const side = greenTries % 2 === 1 ? -1 : 1
+        currentBearing = bearing + side * Math.ceil(greenTries / 2) * GREEN_SEARCH_TURN
+      } else {
+        // Direction is settled; reach is what's left to buy.
+        currentBearing = bestGreenBearing ?? currentBearing
+        stretch = Math.min(stretch + GREEN_STRETCH_STEP, GREEN_STRETCH_MAX)
+      }
     } else if (feltOverlap > 0.08) {
       // Doubling back: swing towards new terrain, and pin the loop to its
       // circle with an extra via point so two legs can't collapse onto the
