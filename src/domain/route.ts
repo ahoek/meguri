@@ -100,13 +100,14 @@ const GREEN_ENOUGH = 0.55
 // A cap, not a target: somewhere with no green at all must not spend every
 // attempt discovering that, on infrastructure shared with everyone else.
 //
-// Five, not three. Measured from the middle of a street grid with a large
-// wood 1.5 km away: grey loops fit on the first attempt in most directions,
-// so at three the sweep had covered barely a quarter turn before settling —
-// and sent a 7 km walk east through more grid while the wood sat due west.
-// Five buys ±106° around the opening bearing, most of the compass, for at
-// most two more routing calls in exactly the places that fit too easily.
-const GREEN_SEARCH_ATTEMPTS = 5
+// Four sweeps, then the stretch gets the rest. Three sweeps covered barely a
+// quarter turn before settling and sent a 7 km walk east through more grid
+// while the wood sat due west; four buys ±106° around the opening bearing.
+// The fifth direction was traded away for the stretched attempts below —
+// measured, the ellipse needs two tries more than the compass needs one more
+// direction, because its first try lands with a radius calibrated on six
+// circles (4.93 km for a 4 km ask) and only the second gets to correct it.
+const GREEN_SEARCH_ATTEMPTS = 4
 // Rotating by roughly a seventh of the compass each time covers new ground
 // rather than nudging into the same terrain.
 const GREEN_SEARCH_TURN = 53
@@ -114,13 +115,14 @@ const GREEN_SEARCH_TURN = 53
  * When the sweep has seen the whole compass and still found nothing green
  * enough, the problem is usually reach, not direction: the green is real but
  * sits beyond the circle, which for a 4 km walk ends 1.3 km out in every
- * direction. So the remaining attempts stretch the loop into an ellipse along
- * the greenest bearing the sweep measured — same walking length, further
- * reach, narrower across. Two steps of 0.3: past 1.6 the two long sides pinch
- * onto the same streets and the overlap penalty rejects what the stretch won.
+ * direction. So the remaining attempt stretches the loop into an ellipse
+ * along the greenest bearing the sweep measured — same walking length, half
+ * again the reach, narrower across. One decisive step: the attempt budget
+ * leaves room for a single stretched try, and 1.5 is as far as the shape goes
+ * before the two long sides pinch onto the same streets and the overlap
+ * penalty rejects what the stretch won.
  */
-const GREEN_STRETCH_STEP = 0.3
-const GREEN_STRETCH_MAX = 1.6
+const GREEN_STRETCH = 1.5
 // How far a via point may be dragged off its circle, as a share of the radius.
 // Measured: 0.9 pulled hard enough to break the length promise outright — a 2 km
 // ask came back 0.92 km and 2.47 km — so the ceiling here is not squeamishness,
@@ -502,12 +504,12 @@ export async function generateLoop({
       feltOverlap < 0.08 &&
       overlap < OVERLAP_CEILING
     const greenEnough = green == null || green >= GREEN_ENOUGH
-    // A fitting grey loop only ends the search once the stretched attempts
-    // have had their turn too — the sweep answers "which direction", the
+    // A fitting grey loop only ends the search once the stretched attempt
+    // has had its turn too — the sweep answers "which direction", the
     // stretch answers "further than the circle can go", and settling before
     // both have spoken is how a walk from a street grid stayed grey with a
     // wood twenty minutes away.
-    if (fits && (greenEnough || stretch >= GREEN_STRETCH_MAX)) break
+    if (fits && (greenEnough || stretch > 1)) break
     // With nothing left to remove, over-target means the waypoints themselves
     // demand the distance — a clean loop through them is as good as it gets.
     if (
@@ -537,9 +539,12 @@ export async function generateLoop({
         const side = greenTries % 2 === 1 ? -1 : 1
         currentBearing = bearing + side * Math.ceil(greenTries / 2) * GREEN_SEARCH_TURN
       } else {
-        // Direction is settled; reach is what's left to buy.
+        // Direction is settled; reach is what's left to buy. An odd count
+        // puts a via point on the ellipse's far vertex — with an even one the
+        // points straddle it, and the stretch buys reach nothing stands on.
         currentBearing = bestGreenBearing ?? currentBearing
-        stretch = Math.min(stretch + GREEN_STRETCH_STEP, GREEN_STRETCH_MAX)
+        stretch = GREEN_STRETCH
+        viaCount = viaCount % 2 ? viaCount : viaCount + 1
       }
     } else if (feltOverlap > 0.08) {
       // Doubling back: swing towards new terrain, and pin the loop to its

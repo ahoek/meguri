@@ -397,6 +397,49 @@ describe('waypoints', () => {
  * the two legs as lanes, one either side of the path — but only where there is
  * really a leg walked twice, because the whole route shifts to do it.
  */
+describe('reaching for green beyond the circle', () => {
+  /**
+   * From a street grid, grey loops fit on the first attempt in any direction,
+   * and a wood 1.5 km away is beyond a 4 km circle's reach in every one of
+   * them. The sweep answers "which direction"; only the stretch can answer
+   * "further than the circle can go" — so the search must not settle for a
+   * fitting grey loop until the stretched attempts have had their turn.
+   */
+  it('stretches along the greenest bearing once the sweep is spent', async () => {
+    const a = ORIGIN
+    const asked: LngLat[][] = []
+    const greyFit = () => ({
+      ...routeOf(
+        [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a],
+        1000,
+      ),
+      greenFraction: 0.1,
+      greenMask: [false, false, false, false],
+    })
+
+    await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      routeThrough: async (points) => {
+        asked.push(points)
+        return greyFit()
+      },
+    })
+
+    // Reach of each request: how far its furthest via point sits from home.
+    const reaches = asked.map((points) =>
+      Math.max(...points.map((p) => metresBetween(p, a))),
+    )
+    // targetKm 1 → radius ~159 m → a circle never asks past ~320 m.
+    expect(Math.min(...reaches)).toBeLessThan(340)
+    // The late attempts do: the ellipse reaches for the green.
+    expect(Math.max(...reaches)).toBeGreaterThan(420)
+  })
+})
+
 describe('spotting a there-and-back leg', () => {
   it('leaves a loop that never repeats itself on the centreline', () => {
     expect(doublesBack(squareLoop(400).geometry.coordinates)).toBe(false)

@@ -48,14 +48,35 @@ export function loopViaPoints(
   bearing: number,
   clockwise: boolean,
   count = 3,
+  stretch = 1,
 ): LngLat[] {
-  const center = destination(start, bearing, radiusKm)
+  // The via points sit on an ellipse whose perimeter is the promised length:
+  // semi-major axis `a` along the bearing, semi-minor `b` across it, with
+  // a + b = 2·radius so the circumference stays what the circle's was (the
+  // first-order term of the perimeter; the few percent beyond it is absorbed
+  // by the same radius fitting that absorbs streets not being circles).
+  //
+  // At stretch 1 this is exactly the old circle. Stretched, the loop spends
+  // the same walking length reaching further out — which is the whole point:
+  // a 4 km circle reaches 1.3 km from the start, and a wood at 1.5 km is out
+  // of its reach in every direction, however well the direction is chosen.
+  // The stretch direction is the bearing, which the caller picks by measured
+  // sweep — not by guessing at polygons, which is the version that failed.
+  const a = radiusKm * stretch
+  const b = radiusKm * (2 - stretch)
+  const center = destination(start, bearing, a)
   const startAngle = bearing + 180 // angle of the start, seen from the center
   const dir = clockwise ? 1 : -1
   const step = 360 / (count + 1)
   const points: LngLat[] = []
   for (let i = 1; i <= count; i++) {
-    points.push(destination(center, startAngle + dir * step * i, radiusKm))
+    const angle = startAngle + dir * step * i
+    // Radius of the ellipse at this angle, measured from the bearing axis.
+    const away = rad(angle - bearing)
+    const r =
+      (a * b) /
+      Math.hypot(b * Math.cos(away), a * Math.sin(away))
+    points.push(destination(center, angle, r))
   }
   return points
 }
