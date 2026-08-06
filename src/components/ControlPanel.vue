@@ -88,8 +88,11 @@ const sliderPos = computed({
 })
 
 function formatMinutes(min: number) {
-  const h = Math.floor(min / 60)
-  const m = Math.round(min % 60)
+  // Round the total before splitting, or 239.6 minutes reads "3 u 60 min":
+  // the hours floor the raw value while the rounded remainder hits sixty.
+  const total = Math.round(min)
+  const h = Math.floor(total / 60)
+  const m = total % 60
   const sp = locale.value === 'ja' ? '' : ' ' // Japanese sets no space before units
   if (!h) return `${m}${sp}${t('minAbbr')}`
   return m
