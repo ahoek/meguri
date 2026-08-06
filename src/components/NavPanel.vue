@@ -160,10 +160,21 @@ function pickVoice(uri: string) {
 const bannerEl = ref<HTMLElement | null>(null)
 let bannerObserver: ResizeObserver | null = null
 
+/**
+ * The instruction changes size — "Nu ga rechtsaf" is one line, a turn with a
+ * "daarna" is two — and a box that snaps between them yanks everything
+ * anchored beneath it. So the content is measured and the box is *told* its
+ * height, which CSS can then ease; anything reading the measured insets moves
+ * with the same easing for free.
+ */
+const bannerBodyEl = ref<HTMLElement | null>(null)
+const bannerH = ref<number | null>(null)
+
 function publishBannerInset() {
   const el = bannerEl.value
   if (!el) return
   store.bannerInset = Math.round(el.getBoundingClientRect().bottom)
+  if (bannerBodyEl.value) bannerH.value = bannerBodyEl.value.offsetHeight
 }
 
 /**
@@ -192,6 +203,7 @@ onMounted(() => {
   publishBannerInset()
   bannerObserver = new ResizeObserver(publishBannerInset)
   if (bannerEl.value) bannerObserver.observe(bannerEl.value)
+  if (bannerBodyEl.value) bannerObserver.observe(bannerBodyEl.value)
 
   measureDash()
   dashObserver = new ResizeObserver(measureDash)
@@ -305,7 +317,13 @@ const progress = computed(() => {
     <!-- Instruction banner -->
     <!-- Only colour it as a warning when it is actually warning about
          something; re-acquiring GPS shouldn't come up red. -->
-    <div ref="bannerEl" class="banner" :class="{ warn: nav.ready && nav.offRoute }">
+    <div
+      ref="bannerEl"
+      class="banner"
+      :class="{ warn: nav.ready && nav.offRoute }"
+      :style="{ height: bannerH == null ? undefined : bannerH + 'px' }"
+    >
+      <div ref="bannerBodyEl" class="banner-body">
       <!-- No usable fix — from the very first second, or after the phone has
            been away long enough that what's on screen is history. Admitting
            that outranks every other banner: a stale one states things that
@@ -358,6 +376,7 @@ const progress = computed(() => {
           </span>
         </div>
       </template>
+      </div>
     </div>
 
     <!-- Out of the flow entirely, anchored to the bottom-left above the dash.
@@ -509,17 +528,25 @@ const progress = computed(() => {
 
 /* ---- instruction banner ---- */
 .banner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
   margin: calc(12px + env(safe-area-inset-top))
     calc(12px + env(safe-area-inset-right)) 0
     calc(12px + env(safe-area-inset-left));
-  padding: 16px 20px;
   border-radius: 22px;
   color: #fff;
   background: linear-gradient(105deg, var(--accent-1), var(--accent-2));
   box-shadow: 0 12px 32px -10px rgba(12, 17, 27, 0.7);
+  /* The shell is told its height (measured off .banner-body) so the wording
+     changing from one line to two eases instead of snapping — and everything
+     anchored to the measured insets below rides the same curve. */
+  overflow: hidden;
+  transition: height 0.28s ease;
+}
+
+.banner-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
   min-height: 84px;
 }
 
@@ -675,6 +702,7 @@ const progress = computed(() => {
 .demo-strip {
   position: absolute;
   top: calc(var(--banner-inset, 96px) + 10px);
+  transition: top 0.28s ease;
   left: calc(12px + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
@@ -745,6 +773,7 @@ const progress = computed(() => {
   left: calc(12px + env(safe-area-inset-left));
   /* Just clear of the dashboard, whatever height it has taken. */
   bottom: calc(var(--dash-inset, 102px) + 10px);
+  transition: bottom 0.28s ease;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -928,6 +957,37 @@ const progress = computed(() => {
     max-width: 460px;
     margin-left: auto;
     margin-right: auto;
+  }
+}
+
+/* A phone on its side. The centred cards above split the short axis into a
+   letterbox with the map showing through the gap, so the whole interface
+   moves into a column on the left — banner, demo strip, dashboard, the lot —
+   and the road ahead gets the right of the screen, which is where the camera
+   aims it (see navPadding). Height rather than width tells a rotated phone
+   apart from a desktop window, which is wide too but has room to centre. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .banner {
+    max-width: 370px;
+    margin-left: calc(12px + env(safe-area-inset-left));
+    margin-right: auto;
+  }
+
+  .bottom {
+    max-width: calc(382px + env(safe-area-inset-left));
+    margin-left: 0;
+    margin-right: auto;
+  }
+
+  /* The round buttons belong to the map, not to the column: pinned to the
+     screen's lower right, where the thumb on that side of the phone lives —
+     leaving the column its familiar top-to-bottom read of banner, demo
+     strip, dashboard. */
+  .side-actions {
+    position: absolute;
+    right: calc(14px + env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    margin: 0;
   }
 }
 </style>

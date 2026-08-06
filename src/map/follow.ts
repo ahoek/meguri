@@ -112,11 +112,18 @@ export function createFollowCamera(map: maplibregl.Map, opts: Options) {
       const pad = map.getPadding()
       const padTop = pad.top ?? 0
       const padBottom = pad.bottom ?? 0
+      const padLeft = pad.left ?? 0
+      const padRight = pad.right ?? 0
+      // All four sides, eased alike. The sides used to be hardcoded to zero
+      // from when navigation padding was only ever vertical — which quietly
+      // wiped the landscape layout's left padding on every frame, so the
+      // arrow crept back to the edge of the control column no matter what
+      // the framing asked for.
       const padding = {
         top: padTop + (framing.padding.top - padTop) * FRAMING_EASE,
         bottom: padBottom + (framing.padding.bottom - padBottom) * FRAMING_EASE,
-        left: 0,
-        right: 0,
+        left: padLeft + (framing.padding.left - padLeft) * FRAMING_EASE,
+        right: padRight + (framing.padding.right - padRight) * FRAMING_EASE,
       }
       move.zoom = zoom
       move.pitch = pitch
@@ -124,7 +131,8 @@ export function createFollowCamera(map: maplibregl.Map, opts: Options) {
       if (
         Math.abs(framing.zoom - zoom) < 0.02 &&
         Math.abs(framing.pitch - pitch) < 0.5 &&
-        Math.abs(framing.padding.top - padding.top) < 2
+        Math.abs(framing.padding.top - padding.top) < 2 &&
+        Math.abs(framing.padding.left - padding.left) < 2
       ) {
         framing = null // settled — zoom is yours again
       }
