@@ -15,6 +15,14 @@ export interface Route {
    * ask for the land-cover estimate, so nothing is known and nothing is scored.
    */
   greenFraction?: number | null
+  /**
+   * Which stretches that green is: `greenMask[i]` covers the segment from
+   * vertex `i` to `i + 1` of the geometry. Null on the same terms as the
+   * fraction, and also when the router's message table could not be aligned
+   * with the geometry — a mask that might be shifted by one street is worse
+   * than none.
+   */
+  greenMask?: boolean[] | null
 }
 
 export type Profile = 'walk' | 'bike'
@@ -29,6 +37,25 @@ export type Profile = 'walk' | 'bike'
  * the choice this exists to settle.
  */
 const GREEN_WEIGHT = 0.35
+
+/**
+ * What doubling back costs, by the ground it happens on.
+ *
+ * Walking the same street twice annoys more than a kilometre missing, so
+ * overlap dominates the score. But charging every repeated metre alike is the
+ * measured reason green loops kept losing: a park has fewer paths than a
+ * street grid, so the route that actually goes through the park doubles back
+ * a little more, and at ×4 a 10% overlap costs more than 100% greenness earns.
+ * The park loop loses on the very thing that makes it green.
+ *
+ * So repeated ground through green is charged less — not nothing. Walking the
+ * same woodland path twice is still walking the same path twice, and a green
+ * loop that manages not to must still beat one that doesn't. At ×1.5 a 10%
+ * green overlap costs 0.15 against the 0.35 the greenness earns: the park
+ * route wins, and among park routes the cleaner one wins.
+ */
+const OVERLAP_WEIGHT = 4
+const GREEN_OVERLAP_WEIGHT = 1.5
 // Green enough to stop looking for something greener.
 const GREEN_ENOUGH = 0.55
 // How many directions to try before accepting a loop that fits but is grey.
@@ -127,20 +154,51 @@ function trimSpurs(coords: LngLat[], keep: ReadonlySet<string> = new Set()) {
   return { points: pts, origin }
 }
 
-/** Fraction of the track that runs over the same street twice. */
-function overlapFraction(coords: LngLat[]) {
+/**
+ * How much of the track runs over the same street twice — split by the ground
+ * it happens on, because the two kinds annoy differently. `overlap` is the
+ * whole of it; `greenOverlap` the part where the repeated stretch runs through
+ * green, per the router's own land-cover mask. No mask means no split: it all
+ * counts as the expensive kind, since "not measured" must not be forgiven as
+ * if it were woodland.
+ */
+function overlapFraction(coords: LngLat[], mask: boolean[] | null = null) {
   const seen = new Set<string>()
   let total = 0
   let repeated = 0
+  let greenRepeated = 0
   const key = (p: LngLat) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`
   for (let i = 1; i < coords.length; i++) {
     const len = distanceKm(coords[i - 1], coords[i])
     total += len
     const edge = [key(coords[i - 1]), key(coords[i])].sort().join('|')
-    if (seen.has(edge)) repeated += len
-    else seen.add(edge)
+    if (seen.has(edge)) {
+      repeated += len
+      if (mask?.[i - 1]) greenRepeated += len
+    } else {
+      seen.add(edge)
+    }
   }
-  return total ? repeated / total : 0
+  if (!total) return { overlap: 0, greenOverlap: 0 }
+  return { overlap: repeated / total, greenOverlap: greenRepeated / total }
+}
+
+/**
+ * The green mask for a trimmed line, from the mask of the line it was cut
+ * from. An edge that survived keeps its greenness; an edge the trim invented —
+ * bridging where a spur was removed — is unknown, and unknown is priced as
+ * grey rather than credited as green.
+ */
+function remapMask(
+  mask: boolean[] | null | undefined,
+  origin: number[],
+): boolean[] | null {
+  if (!mask) return null
+  const out: boolean[] = new Array(Math.max(origin.length - 1, 0))
+  for (let j = 0; j < origin.length - 1; j++) {
+    out[j] = origin[j + 1] === origin[j] + 1 ? (mask[origin[j]] ?? false) : false
+  }
+  return out
 }
 
 /**
@@ -275,12 +333,16 @@ export async function generateLoop({
     const reachedM = waypoints.map((w) => nearestVertexM(routed, w))
     const keep = new Set(waypoints.map((w) => pointKey(nearestVertex(routed, w))))
 
+    // The mask indexes into the untrimmed geometry, like the voice hints; it
+    // is remapped alongside everything else that gets cut.
+    const routedMask = route.greenMask ?? null
     const { points: trimmed, origin } = trimSpurs(routed, keep)
     if (trimmed.length < route.geometry.coordinates.length) {
       const newKm = polylineKm(trimmed)
       route.durationSec *= newKm / route.distanceKm
       route.distanceKm = newKm
       route.geometry = { ...route.geometry, coordinates: trimmed }
+      route.greenMask = remapMask(routedMask, origin)
       // Voice hints index into the untrimmed point list — re-index them and
       // drop any whose point was on a spur we removed.
       const newIndexOf = new Map(origin.map((old, next) => [old, next]))
@@ -296,8 +358,11 @@ export async function generateLoop({
     // hunting a shape with no backtracking, which for a pin down a dead end
     // does not exist. Measured on the route with every spur removed, which
     // is what the ride would look like without the stops.
-    const bare = waypoints.length ? trimSpurs(routed).points : route.geometry.coordinates
-    const overlap = overlapFraction(bare)
+    const bareTrim = waypoints.length ? trimSpurs(routed) : { points: trimmed, origin }
+    const { overlap, greenOverlap } = overlapFraction(
+      bareTrim.points,
+      preferGreen ? remapMask(routedMask, bareTrim.origin) : null,
+    )
 
     // Reaching the stops is not negotiable. Compared against what the router
     // itself achieved, not an absolute distance: a pin dropped in the middle
@@ -307,8 +372,8 @@ export async function generateLoop({
       (w, i) => nearestVertexM(route.geometry.coordinates, w) > reachedM[i] + TRIM_SLACK_M,
     ).length
 
-    // Riding the same road twice annoys more than a kilometre missing, so
-    // overlap dominates the score — but a missed stop outranks them both.
+    // A missed stop outranks everything; then overlap, priced by the ground it
+    // repeats (see OVERLAP_WEIGHT / GREEN_OVERLAP_WEIGHT); then length.
     //
     // And then greenness, which is why a loop starting at the edge of a park
     // used to walk into town instead. The direction of the loop is the single
@@ -319,7 +384,13 @@ export async function generateLoop({
     // length but never sends you round the same block twice.
     const green = preferGreen ? route.greenFraction : null
     const greenScore = typeof green === 'number' ? (1 - green) * GREEN_WEIGHT : 0
-    const score = missed * 100 + distErr + overlap * 4 + greenScore
+    const greyOverlap = overlap - greenOverlap
+    const score =
+      missed * 100 +
+      distErr +
+      greyOverlap * OVERLAP_WEIGHT +
+      greenOverlap * GREEN_OVERLAP_WEIGHT +
+      greenScore
 
     if (score < bestScore) {
       best = route
@@ -327,12 +398,25 @@ export async function generateLoop({
     }
     if (typeof green === 'number') bestGreen = Math.max(bestGreen, green)
 
+    // The overlap the thresholds below judge, priced like the score: repeated
+    // green counts at the discount. Without this, a park loop carrying a bit
+    // of green doubling could never "fit", and the search would swing away
+    // from the very park the score is about to prefer. The discount alone
+    // would call a walk a fifth doubled "fitting" though, so the undiscounted
+    // figure keeps a ceiling of its own — doubling back is doubling back,
+    // whatever the ground, and past that much of it the search should keep
+    // looking for a cleaner way round rather than settling.
+    const feltOverlap =
+      greyOverlap + greenOverlap * (GREEN_OVERLAP_WEIGHT / OVERLAP_WEIGHT)
+    const OVERLAP_CEILING = 0.15
+
     // Good enough to stop — unless there might be a greener way round. The old
     // condition took the first candidate that fitted, which on a park's edge was
     // usually the one heading into town, because the very first bearing tried is
     // a random one. Now a fitting-but-grey loop buys a few more directions
     // before we settle, and a fitting green one still stops immediately.
-    const fits = !missed && distErr < 0.06 && overlap < 0.08
+    const fits =
+      !missed && distErr < 0.06 && feltOverlap < 0.08 && overlap < OVERLAP_CEILING
     const greenEnough = green == null || green >= GREEN_ENOUGH
     if (fits && (greenEnough || attempt >= GREEN_SEARCH_ATTEMPTS)) break
     // With nothing left to remove, over-target means the waypoints themselves
@@ -341,7 +425,7 @@ export async function generateLoop({
       waypoints.length &&
       viaCount === 0 &&
       route.distanceKm >= targetKm &&
-      overlap < 0.08
+      feltOverlap < 0.08
     ) {
       break
     }
@@ -362,7 +446,7 @@ export async function generateLoop({
       greenTries += 1
       const side = greenTries % 2 === 1 ? -1 : 1
       currentBearing = bearing + side * Math.ceil(greenTries / 2) * GREEN_SEARCH_TURN
-    } else if (overlap > 0.08) {
+    } else if (feltOverlap > 0.08) {
       // Doubling back: swing towards new terrain, and pin the loop to its
       // circle with an extra via point so two legs can't collapse onto the
       // same road between them — unless the waypoints already make the loop

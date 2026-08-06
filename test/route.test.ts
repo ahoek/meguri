@@ -92,6 +92,96 @@ describe('scoring loop candidates', () => {
     expect(route.geometry.coordinates).toHaveLength(clean.length)
     expect(route.distanceKm).toBeCloseTo(1.5)
   })
+
+  /**
+   * The measured deadlock, pinned. A park has fewer paths than a street grid,
+   * so the loop that actually goes through the park doubles back a little
+   * more — and with every repeated metre priced alike, a 10% overlap cost more
+   * than 100% greenness earned. Seven candidates would be generated and the
+   * park one thrown away for the town one, every time, which is why "prefer
+   * nature" kept producing streets.
+   */
+  it('lets a park loop double back a little rather than sending you to town', async () => {
+    const a = ORIGIN
+    const b = offset(a, 0, 200)
+    // Through the park: repeats the a–b path (~16% doubled), all of it green.
+    const park = [a, b, offset(b, 300, 0), offset(a, 300, 0), b, a]
+    const parkRoute = () => ({
+      ...routeOf(park, 1000),
+      greenFraction: 0.9,
+      greenMask: park.slice(1).map(() => true),
+    })
+    // Around the block: clean and exactly on target, but grey.
+    const town = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    const townRoute = () => ({
+      ...routeOf(town, 1000),
+      greenFraction: 0.05,
+      greenMask: town.slice(1).map(() => false),
+    })
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      routeThrough: async () => (call++ === 0 ? parkRoute() : townRoute()),
+    })
+
+    expect(route.greenFraction).toBe(0.9)
+  })
+
+  // The discount is a discount, not forgiveness: between two park loops, the
+  // one that does not walk the same path twice still wins. The doubled one
+  // here is also past the overlap ceiling, so it must not stop the search
+  // before the cleaner one has been seen at all.
+  it('still prefers the green loop that does not double back', async () => {
+    const a = ORIGIN
+    const b = offset(a, 0, 200)
+    const doubled = [a, b, offset(b, 300, 0), offset(a, 300, 0), b, a]
+    const clean = [a, offset(a, 0, 250), offset(a, 250, 250), offset(a, 250, 0), a]
+    const green = (coords: LngLat[], lengthM: number) => ({
+      ...routeOf(coords, lengthM),
+      greenFraction: 0.9,
+      greenMask: coords.slice(1).map(() => true),
+    })
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      routeThrough: async () => (call++ === 0 ? green(doubled, 1000) : green(clean, 1000)),
+    })
+
+    expect(route.geometry.coordinates).toHaveLength(clean.length)
+  })
+
+  // Without the router's land-cover estimate there is no mask, and repeated
+  // ground must be priced at the full rate — "not measured" is not "woodland".
+  it('gives no discount when the router never said what the ground was', async () => {
+    const a = ORIGIN
+    const b = offset(a, 0, 200)
+    const doubled = [a, b, offset(b, 300, 0), offset(a, 300, 0), b, a]
+    const clean = [a, offset(a, 0, 300), offset(a, 300, 300), offset(a, 300, 0), a]
+
+    let call = 0
+    const route = await generateLoop({
+      start: ORIGIN,
+      targetKm: 1,
+      bearing: 0,
+      clockwise: true,
+      preferGreen: true,
+      // Doubled is exactly on target; clean is half a kilometre over. With no
+      // mask the doubling costs full price and clean must still win.
+      routeThrough: async () => (call++ === 0 ? routeOf(doubled, 1000) : routeOf(clean, 1500)),
+    })
+
+    expect(route.geometry.coordinates).toHaveLength(clean.length)
+  })
 })
 
 describe('waypoints', () => {

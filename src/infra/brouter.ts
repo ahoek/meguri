@@ -66,13 +66,15 @@ async function requestRoute(
   const json = await res.json()
   const feature = json.features?.[0]
   if (!feature) throw new Error('No route found')
+  const green = readGreen(feature.properties.messages, feature.geometry.coordinates)
   return {
     geometry: feature.geometry, // LineString, coordinates are [lng, lat, ele]
     distanceKm: Number(feature.properties['track-length']) / 1000,
     durationSec: Number(feature.properties['total-time']),
     // [pointIndex, command, exitNumber, distanceToNext, angle] per maneuver
     voicehints: feature.properties.voicehints ?? [],
-    greenFraction: greenFraction(feature.properties.messages),
+    greenFraction: green.fraction,
+    greenMask: green.mask,
   }
 }
 
@@ -81,42 +83,78 @@ async function requestRoute(
 const GREEN_CLASS = 4
 
 /**
- * How much of a route runs through green, read out of BRouter's per-segment
- * message table.
+ * What a route knows about its own greenness, read out of BRouter's message
+ * table: the share of its length through green, and which segments of its
+ * geometry that green actually is.
  *
  * This costs nothing: the nature profiles already reference
  * `estimated_forest_class`, so BRouter already returns it alongside the geometry
  * we asked for. It was being thrown away, which is why the planner could compare
  * two candidate loops and have no idea one of them went through a park.
  *
- * Null rather than zero when the column is missing — the stock profiles do not
- * ask for the estimate, and "not measured" must not be scored as "not green".
+ * The mask is per geometry segment — `mask[i]` covers the stretch from vertex
+ * `i` to `i + 1`. Each message row describes one run of way and names the exact
+ * vertex it ends on (verified against the live server: every row's coordinates
+ * land on a geometry vertex at microdegree precision), so the mask is built by
+ * walking vertices and rows in step. If a row's end vertex cannot be found the
+ * whole mask is abandoned rather than guessed at.
+ *
+ * Nulls rather than zeroes when the estimate is missing — the stock profiles do
+ * not ask for it, and "not measured" must not be scored as "not green".
  */
-function greenFraction(messages: unknown): number | null {
-  if (!Array.isArray(messages) || messages.length < 2) return null
+export function readGreen(
+  messages: unknown,
+  coordinates: LngLat[],
+): { fraction: number | null; mask: boolean[] | null } {
+  const none = { fraction: null, mask: null }
+  if (!Array.isArray(messages) || messages.length < 2) return none
   const header = messages[0]
-  if (!Array.isArray(header)) return null
+  if (!Array.isArray(header)) return none
   const tagCol = header.indexOf('WayTags')
   const distCol = header.indexOf('Distance')
-  if (tagCol < 0 || distCol < 0) return null
+  const lonCol = header.indexOf('Longitude')
+  const latCol = header.indexOf('Latitude')
+  if (tagCol < 0 || distCol < 0) return none
 
   let total = 0
   let green = 0
   let sawEstimate = false
+  const mask: boolean[] = new Array(Math.max(coordinates.length - 1, 0)).fill(false)
+  let maskOk = lonCol >= 0 && latCol >= 0 && coordinates.length > 1
+  let seg = 0
+
   for (const row of messages.slice(1)) {
     const metres = Number(row[distCol])
-    if (!Number.isFinite(metres)) continue
-    total += metres
+    let rowGreen = false
     for (const tag of String(row[tagCol]).split(' ')) {
       if (!tag.startsWith('estimated_forest_class=')) continue
       sawEstimate = true
-      if (Number(tag.slice('estimated_forest_class='.length)) >= GREEN_CLASS) {
-        green += metres
+      rowGreen = Number(tag.slice('estimated_forest_class='.length)) >= GREEN_CLASS
+    }
+    if (Number.isFinite(metres)) {
+      total += metres
+      if (rowGreen) green += metres
+    }
+
+    if (!maskOk) continue
+    // Paint segments forward until we stand on the vertex this row ends at.
+    const endLng = Number(row[lonCol])
+    const endLat = Number(row[latCol])
+    let found = false
+    while (seg < mask.length) {
+      mask[seg] = rowGreen
+      seg += 1
+      const v = coordinates[seg]
+      if (Math.round(v[0] * 1e6) === endLng && Math.round(v[1] * 1e6) === endLat) {
+        found = true
+        break
       }
     }
+    if (!found) maskOk = false
   }
-  if (!total || !sawEstimate) return null
-  return green / total
+
+  if (!total || !sawEstimate) return none
+  return { fraction: green / total, mask: maskOk ? mask : null }
 }
 
 const reRegistered: Partial<Record<Profile, boolean>> = {}
