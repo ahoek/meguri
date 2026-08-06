@@ -161,6 +161,19 @@ watch(
   },
 )
 
+// A route belongs to the profile that computed it. Left standing across a
+// mode switch it is a lie in the other mode's colours — a walking loop may
+// thread paths no bike is allowed on, and one tap on Start would navigate a
+// ride along it. Changing mode invalidates the route the same way moving the
+// start does. Not during navigation: the session owns its route, and the
+// planner's toggle must not blank the line being walked.
+watch(
+  () => store.mode,
+  () => {
+    if (!nav.active) store.route = null
+  },
+)
+
 watch(
   () => nav.active,
   (active) => {
