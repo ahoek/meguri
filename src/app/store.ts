@@ -32,6 +32,8 @@ interface Store {
   bannerInset: number
   /** The map's live bearing, for chrome that shows which way north is. */
   mapBearing: number
+  /** Signature of the settings the current route was generated from. */
+  routeSignature: string
   waypoints: LngLat[]
   waypointMode: boolean
 }
@@ -145,12 +147,17 @@ export const store = reactive<Store>({
   flyTo: null, // { center, zoom, id } — MapView watches this
   sheetInset: 0, // px of viewport covered by the mobile sheet; MapView pads around it
   mapBearing: 0,
+  routeSignature: '',
   bannerInset: 0, // px covered by the navigation banner; the map's controls duck under it
   waypoints: loadWaypoints(), // [lng, lat][] the loop must pass through
   waypointMode: false, // map taps add waypoints instead of moving the start
   bearing: Math.random() * 360,
   clockwise: Math.random() < 0.5,
 })
+
+// A route restored from storage was built from the settings restored beside
+// it, so it starts life matching rather than stale.
+if (store.route) store.routeSignature = inputSignature()
 
 watch(
   () => store.route,
@@ -228,6 +235,33 @@ watch(
   },
   { deep: true },
 )
+
+/**
+ * What the route on screen was built from.
+ *
+ * The generate button has two jobs and they are not the same job: apply
+ * settings you have just changed, or roll a different loop from the settings
+ * as they stand. Re-running with untouched settings returns the identical
+ * loop — the search starts from the stored bearing — so a button offering
+ * "update" there is a button that does nothing. Comparing this signature
+ * against the current one tells the two apart, so the button can say which
+ * it is about to do.
+ */
+function inputSignature(): string {
+  return JSON.stringify([
+    store.mode,
+    store.start?.lngLat,
+    store.targetType,
+    targetKm(),
+    store.nature,
+    store.waypoints,
+  ])
+}
+
+/** True when the settings have moved on from the route being shown. */
+export function routeStale(): boolean {
+  return !!store.route && store.routeSignature !== inputSignature()
+}
 
 /**
  * Somewhere greener to put a via point, if the map knows of any.
@@ -392,6 +426,7 @@ export async function generate({ shuffle = false } = {}) {
   try {
     const { mode, nature } = store
     const signal = abortController.signal
+    const signature = inputSignature()
     store.route = await generateLoop({
       start: store.start.lngLat,
       targetKm: targetKm(),
@@ -404,6 +439,9 @@ export async function generate({ shuffle = false } = {}) {
       metresThroughBuildings: nature ? buildingMeter : undefined,
       routeThrough: (points) => fetchRoute(points, mode, nature, signal),
     })
+    // Taken from before the request, not after: a setting changed while the
+    // router was thinking is a setting the route does not reflect.
+    store.routeSignature = signature
   } catch (err) {
     if ((err as Error).name !== 'AbortError') {
       showError('errNoRoute')

@@ -12,6 +12,7 @@ import {
   showError,
   clearWaypoints,
   removeWaypoint,
+  routeStale,
 } from '../app/store'
 import { shareGpx, canShareGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
@@ -167,6 +168,31 @@ async function onCheckUpdates() {
     updateState.value = 'current'
     setTimeout(() => (updateState.value = 'idle'), 3000)
   }, 1200)
+}
+
+/**
+ * The generate button has two jobs, and saying which one it is about to do is
+ * the whole point of it. With settings you have just changed, it applies them.
+ * With settings untouched it would return the identical loop — the search
+ * starts from the stored bearing — so there it rolls a new one instead.
+ *
+ * It also stops being the loudest thing on screen once a route exists: from
+ * that moment the walk itself is what you came for, and two full-width green
+ * bars arguing about it is how the panel got confusing.
+ */
+const primaryAction = computed(() => {
+  if (!store.route) return { label: t('createRoute'), shuffle: false, primary: true }
+  if (routeStale()) return { label: t('regenerateRoute'), shuffle: false, primary: false }
+  return { label: t('surpriseMe'), shuffle: true, primary: false }
+})
+
+// GPX and the demo are things you do with a route, not steps in making one,
+// so they sit behind the card's overflow rather than competing with Start.
+const moreOpen = ref(false)
+
+function withMenuClosed(fn: () => void) {
+  moreOpen.value = false
+  fn()
 }
 
 const routeStats = computed(() => {
@@ -419,9 +445,18 @@ const routeStats = computed(() => {
       />
     </div>
 
-    <button class="cta" :disabled="store.busy" @click="generate()">
+    <button
+      class="cta"
+      :class="{ secondary: !primaryAction.primary }"
+      :disabled="store.busy"
+      @click="generate({ shuffle: primaryAction.shuffle })"
+    >
       <span v-if="store.busy" class="spinner" aria-hidden="true"></span>
-      <span>{{ store.busy ? t('plotting') : store.route ? t('regenerateRoute') : t('createRoute') }}</span>
+      <svg v-else-if="primaryAction.shuffle" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <span>{{ store.busy ? t('plotting') : primaryAction.label }}</span>
     </button>
 
     <label class="nature-row">
@@ -444,14 +479,61 @@ const routeStats = computed(() => {
 
     <Transition name="rise">
       <div v-if="routeStats" class="result-card">
-        <div class="stats">
-          <div class="stat">
-            <span class="stat-value">{{ routeStats.distance }}</span>
-            <span class="stat-label">{{ t('distance') }}</span>
+        <div class="result-head">
+          <div class="stats">
+            <div class="stat">
+              <span class="stat-value">{{ routeStats.distance }}</span>
+              <span class="stat-label">{{ t('distance') }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">{{ routeStats.duration }}</span>
+              <span class="stat-label">{{ store.mode === 'bike' ? t('estRideTime') : t('estWalkTime') }}</span>
+            </div>
           </div>
-          <div class="stat">
-            <span class="stat-value">{{ routeStats.duration }}</span>
-            <span class="stat-label">{{ store.mode === 'bike' ? t('estRideTime') : t('estWalkTime') }}</span>
+          <div class="more-wrap">
+            <button
+              class="more-btn"
+              :aria-label="t('moreActions')"
+              :title="t('moreActions')"
+              aria-haspopup="menu"
+              :aria-expanded="moreOpen"
+              @click="moreOpen = !moreOpen"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+                <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+              </svg>
+            </button>
+            <div v-if="moreOpen" class="more-backdrop" @click="moreOpen = false"></div>
+            <div v-if="moreOpen" class="more-menu" role="menu">
+              <!-- Share sheet where there is one — that is how the loop reaches
+                   a watch, a head unit, or another route app — and a plain
+                   download where there isn't. The glyph says which, so the item
+                   does not promise a download and open a sheet. -->
+              <button
+                role="menuitem"
+                @click="withMenuClosed(() => shareGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk')))"
+              >
+                <svg v-if="sharesGpx" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v6.5h14V13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                {{ t('gpx') }}
+              </button>
+              <!-- Walks the loop on its own, so navigation can be shown without
+                   going outside. A deliberate tap, never a gesture, and the
+                   DEMO stamp stays on screen the whole time — a fake GPS you
+                   cannot see you have switched on is worse than no fake GPS. -->
+              <button role="menuitem" @click="withMenuClosed(() => onStartNavigation(true))">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 5.5v13l11-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                {{ t('demo') }}
+              </button>
+            </div>
           </div>
         </div>
         <button class="nav-cta" @click="onStartNavigation()">
@@ -461,38 +543,6 @@ const routeStats = computed(() => {
           {{ t('navStart') }}
         </button>
 
-        <div class="result-actions">
-          <button class="ghost-btn" :disabled="store.busy" @click="generate({ shuffle: true })">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            {{ t('surpriseMe') }}
-          </button>
-          <!-- Share sheet where there is one — that is how the loop reaches a
-               watch, a head unit, or another route app — and a plain download
-               where there isn't. The glyph says which, so the button does not
-               promise a download and open a sheet. -->
-          <button class="ghost-btn" @click="shareGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk'))">
-            <svg v-if="sharesGpx" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v6.5h14V13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            {{ t('gpx') }}
-          </button>
-          <!-- Walks the loop on its own, so navigation can be shown without
-               going outside. Deliberately plain and next to the real thing
-               rather than hidden behind a gesture — a fake GPS you cannot see
-               you have switched on is worse than no fake GPS. -->
-          <button class="ghost-btn" @click="onStartNavigation(true)">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M8 5.5v13l11-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            {{ t('demo') }}
-          </button>
-        </div>
       </div>
     </Transition>
 
@@ -1069,6 +1119,28 @@ const routeStats = computed(() => {
   filter: brightness(1.06);
 }
 
+/* With a route on screen the walk is the point, so this hands the accent —
+   and the only full-width green bar — over to Start navigation. */
+.cta.secondary {
+  padding: 12px 15px;
+  font-size: 15px;
+  color: var(--ink-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--hairline);
+  box-shadow: none;
+}
+
+.cta.secondary:hover:not(:disabled) {
+  filter: none;
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.cta.secondary svg {
+  width: 17px;
+  height: 17px;
+}
+
 .cta:active:not(:disabled) {
   transform: translateY(0);
 }
@@ -1440,34 +1512,90 @@ const routeStats = computed(() => {
   height: 18px;
 }
 
-.result-actions {
+.result-head {
   display: flex;
-  gap: 9px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.ghost-btn {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 14px;
+/* Everything you can do *with* a route rather than *to* it. A dot menu keeps
+   them one tap away without giving export and a GPS simulator the same weight
+   as setting off. */
+.more-wrap {
+  position: relative;
+  flex: none;
+}
+
+.more-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
   border-radius: 11px;
+  color: var(--ink-2);
+  border: 1px solid transparent;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.more-btn:hover,
+.more-btn[aria-expanded='true'] {
+  color: var(--ink-1);
+  background: var(--field);
+  border-color: var(--hairline);
+}
+
+.more-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Sits above the tap that opened it, so the menu itself is never under a
+   finger that is still on the screen. */
+.more-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
   background: var(--surface-solid);
   border: 1px solid var(--hairline);
-  font-size: 13.5px;
+  box-shadow: 0 16px 34px -12px rgba(6, 10, 18, 0.7);
+}
+
+.more-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
   font-weight: 600;
+  color: var(--ink-1);
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.more-menu button:hover {
+  background: var(--field);
+}
+
+.more-menu svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
   color: var(--ink-2);
-  transition: color 0.2s, border-color 0.2s, transform 0.15s;
-}
-
-.ghost-btn:hover:not(:disabled) {
-  color: var(--accent-1);
-  border-color: var(--accent-1);
-  transform: translateY(-1px);
-}
-
-.ghost-btn svg {
-  width: 16px;
-  height: 16px;
 }
 
 .build-stamp {
