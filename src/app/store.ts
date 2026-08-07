@@ -24,6 +24,8 @@ interface Store {
   nature: boolean
   route: Route | null
   busy: boolean
+  /** A change is waiting out its debounce — heard, not yet acted on. */
+  pending: boolean
   error: string
   flyTo: { center: LngLat; zoom: number; id: number } | null
   bearing: number
@@ -143,6 +145,7 @@ export const store = reactive<Store>({
   nature: localStorage.getItem('meguri-nature') !== 'off',
   route: savedRoute?.route ?? null, // { geometry, distanceKm, durationSec }
   busy: false,
+  pending: false,
   error: '',
   flyTo: null, // { center, zoom, id } — MapView watches this
   sheetInset: 0, // px of viewport covered by the mobile sheet; MapView pads around it
@@ -281,7 +284,12 @@ let autoTimer: ReturnType<typeof setTimeout> | undefined
  */
 function scheduleRoute(delayMs: number) {
   clearTimeout(autoTimer)
+  // Said out loud from the first frame of the drag, not when the wait ends:
+  // a panel that sits there for two thirds of a second looking like it missed
+  // the change is a panel you press a button on.
+  store.pending = true
   autoTimer = setTimeout(() => {
+    store.pending = false
     if (!store.start || nav.active) return
     // Moved and moved back inside the wait: the settings the route was built
     // from are the settings as they stand, so there is nothing to redraw.

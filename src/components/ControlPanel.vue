@@ -184,23 +184,36 @@ async function onCheckUpdates() {
   }, 1200)
 }
 
+/** Working, from the first frame of a drag to the last request coming back. */
+const working = computed(() => store.pending || store.busy)
+
 /**
- * One job left. Applying a setting is not something to press for any more —
- * the loop redraws itself as the settings move — so what remains is the one
- * thing the settings cannot ask for: a different loop from the same numbers.
- * The search starts from a stored bearing, so this rolls a new one, and the
- * label names that outcome rather than a mood.
+ * What is left to press.
  *
- * It stays quiet next to the route it belongs to: once a loop is on screen the
- * walk is what you came for, and two full-width green bars arguing about that
- * is how the panel got confusing. Before any route exists it is the loud one —
- * which by then means there is no starting point yet, and pressing it says so.
+ * Nothing, until there is a starting point. "Create my route" was a promise
+ * the panel could not keep without one: pressing it produced a telling-off,
+ * and now that the loop draws itself it would not even do that. The search
+ * box, the locate button and the map are the whole of the empty state.
+ *
+ * With a route on screen, the one thing the settings cannot ask for: a
+ * different loop from the same numbers. The search starts from a stored
+ * bearing, so this rolls a new one, and the label names that outcome rather
+ * than a mood. It stays quiet there — the walk is what you came for, and two
+ * full-width green bars arguing about that is how the panel got confusing.
+ *
+ * With a start but no route and nothing in flight, the routing failed. That is
+ * the one dead end automation creates: no setting has moved, so nothing will
+ * retry on its own, and the button becomes the way out.
  */
 const primaryAction = computed(() =>
   store.route
     ? { label: t('anotherRoute'), shuffle: true, primary: false }
-    : { label: t('createRoute'), shuffle: false, primary: true },
+    : { label: t('retryRoute'), shuffle: false, primary: true },
 )
+
+// While the first loop is being worked out there is nothing to retry and
+// nothing to re-roll, and the card below is already saying so.
+const showAction = computed(() => !!store.start && (!!store.route || !working.value))
 
 // GPX and the demo are things you do with a route, not steps in making one,
 // so they sit behind the card's overflow rather than competing with Start.
@@ -262,7 +275,7 @@ const routeStats = computed(() => {
       <!-- The sheet collapses as soon as a route lands, so starting must not
            require digging the result card back out. The figures open the sheet
            like the grabber does — they are a summary of what is inside it. -->
-      <div v-if="collapsed && routeStats" class="strip-row">
+      <div v-if="collapsed && routeStats" class="strip-row" :class="{ working }">
         <button class="mini-stats" :aria-label="t('panelToggle')" @click="collapsed = false">
           {{ routeStats.distance }} · {{ routeStats.duration }}
         </button>
@@ -492,22 +505,29 @@ const routeStats = computed(() => {
     </label>
 
     <button
+      v-if="showAction"
       class="cta"
       :class="{ secondary: !primaryAction.primary }"
-      :disabled="store.busy"
       @click="generate({ shuffle: primaryAction.shuffle })"
     >
-      <span v-if="store.busy" class="spinner" aria-hidden="true"></span>
-      <svg v-else-if="primaryAction.shuffle" viewBox="0 0 24 24" aria-hidden="true">
+      <svg v-if="primaryAction.shuffle" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
-      <span>{{ store.busy ? t('plotting') : primaryAction.label }}</span>
+      <span>{{ primaryAction.label }}</span>
     </button>
 
+    <!-- Progress belongs where the answer will be, not on a button: a button
+         is something you do, and this is something being done for you. With no
+         figures yet there is nothing to fade, so it takes the card's shape and
+         says what is happening. -->
+    <div v-if="working && !routeStats" class="plotting" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      {{ t('plotting') }}
+    </div>
 
     <Transition name="rise">
-      <div v-if="routeStats" class="result-card">
+      <div v-if="routeStats" class="result-card" :class="{ working }" :aria-busy="working">
         <div class="result-head">
           <div class="stats">
             <div class="stat">
@@ -1249,12 +1269,15 @@ const routeStats = computed(() => {
   cursor: default;
 }
 
+/* Takes the button's own colour: this now spins on the quiet button too, every
+   time the slider settles, and a white ring on a pale surface is a button that
+   looks like it did nothing. */
 .spinner {
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  border: 2.5px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
+  border: 2.5px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
   animation: spin 0.8s linear infinite;
 }
 
@@ -1526,6 +1549,8 @@ const routeStats = computed(() => {
 
 /* ---- result ---- */
 .result-card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 13px;
@@ -1533,6 +1558,77 @@ const routeStats = computed(() => {
   border-radius: 17px;
   background: var(--accent-soft);
   border: 1px solid var(--hairline);
+}
+
+/* The figures are an answer, and while the next one is being worked out they
+   are the previous question's. So they fade and stop being touchable — you
+   cannot set off along a route that is being replaced under you — but they
+   stay put: blanking the card would move everything below it every time the
+   slider settled. The bar is what makes the fade read as work rather than as
+   something switched off; it sits on the card itself, so it keeps its colour
+   while the contents lose theirs. */
+.result-card.working > * {
+  opacity: 0.42;
+}
+
+.result-card.working {
+  pointer-events: none;
+}
+
+.result-card.working::before,
+.plotting::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38%;
+  height: 2px;
+  background: var(--accent-gradient);
+  animation: sweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Same shape and place as the card it stands in for, so the panel does not
+   jump when the figures arrive. */
+.plotting {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px;
+  border-radius: 17px;
+  background: var(--field);
+  border: 1px solid var(--hairline);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-card.working::before,
+  .plotting::before {
+    width: 100%;
+    animation: none;
+  }
+
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* The collapsed strip carries the same figures, so it says the same thing. */
+.strip-row.working {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .stats {
