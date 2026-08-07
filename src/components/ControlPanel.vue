@@ -408,7 +408,7 @@ const routeStats = computed(() => {
       </div>
     </div>
 
-    <div class="field-group">
+    <div class="field-group target-group">
       <div class="label-row">
         <span class="label">{{ t('howFar') }}</span>
         <div class="mini-seg" role="radiogroup" :aria-label="t('targetBy')">
@@ -1104,6 +1104,19 @@ const routeStats = computed(() => {
 }
 
 /* ---- target ---- */
+/* The question, then the answer. "How far" and the km/time switch decide what
+   is being asked; the number, its estimate and the slider are one control
+   answering it, so they sit close enough to read as a single object while the
+   label row stands off from them. Before, all four were spaced alike and read
+   as four separate things stacked up. */
+.target-group {
+  gap: 4px;
+}
+
+.target-group > .label-row {
+  margin-bottom: 8px;
+}
+
 .target {
   display: flex;
   align-items: baseline;
@@ -1114,6 +1127,7 @@ const routeStats = computed(() => {
 .target-value {
   font-size: 34px;
   font-weight: 700;
+  line-height: 1.1;
   letter-spacing: -0.03em;
   background: var(--accent-gradient);
   -webkit-background-clip: text;
