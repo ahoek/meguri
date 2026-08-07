@@ -593,8 +593,26 @@ const routeStats = computed(() => {
 .sheet-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 0;
   padding: 22px;
+}
+
+/* Grouping by rhythm rather than by boxes. Every gap used to be the same
+   eighteen pixels, so the eye had no way to tell that the search, the start
+   and the stops answer one question while the distance answers another — the
+   labels were carrying that on their own. Now a new question opens a wider
+   gap, a settings row hugs the group it belongs to, and the action stands
+   apart from the settings that feed it. */
+.sheet-body > * + * {
+  margin-top: 20px;
+}
+
+.sheet-body > .field-group {
+  margin-top: 26px;
+}
+
+.sheet-body > .setting-row {
+  margin-top: 6px;
 }
 
 /* A flex column shrinks its children before it agrees to scroll, so a row
@@ -906,11 +924,14 @@ const routeStats = computed(() => {
   gap: 9px;
 }
 
+/* Sentence case, like everything else on the sheet. The caps were the only
+   raised voice in the panel, and they were shouting the two words the user
+   least needs shouted — with the spacing above doing the grouping, a quiet
+   label is enough to name a section. */
 .label {
   font-size: 12.5px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.01em;
   color: var(--ink-3);
 }
 
@@ -1493,11 +1514,11 @@ const routeStats = computed(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* The same role as .label, so it gets the same voice. */
 .stat-label {
   font-size: 12px;
   color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
 }
 
 .nav-cta {
@@ -1612,7 +1633,10 @@ const routeStats = computed(() => {
 }
 
 .build-stamp {
-  margin: -6px 0 0;
+  /* Explicit, because a shorthand margin here beats the sheet's own rhythm
+     rule whatever it says — this used to carry a -6px nudge tuned against a
+     uniform gap that no longer exists, which turned into an overlap. */
+  margin: 20px 0 0;
   font-size: 10.5px;
   text-align: center;
   color: var(--ink-3);
