@@ -188,32 +188,18 @@ async function onCheckUpdates() {
 const working = computed(() => store.pending || store.busy)
 
 /**
- * What is left to press.
+ * The panel's own button, and the only state that still needs one.
  *
- * Nothing, until there is a starting point. "Create my route" was a promise
- * the panel could not keep without one: pressing it produced a telling-off,
- * and now that the loop draws itself it would not even do that. The search
- * box, the locate button and the map are the whole of the empty state.
+ * "Create my route" was a promise it could not keep: it only ever showed when
+ * there was no starting point, and pressing it produced a telling-off. Now
+ * that the loop draws itself the empty state has no button at all — the search
+ * box, the locate button and the map are the whole of it. Re-rolling moved
+ * into the card it re-rolls, where it costs no room of its own.
  *
- * With a route on screen, the one thing the settings cannot ask for: a
- * different loop from the same numbers. The search starts from a stored
- * bearing, so this rolls a new one, and the label names that outcome rather
- * than a mood. It stays quiet there — the walk is what you came for, and two
- * full-width green bars arguing about that is how the panel got confusing.
- *
- * With a start but no route and nothing in flight, the routing failed. That is
- * the one dead end automation creates: no setting has moved, so nothing will
- * retry on its own, and the button becomes the way out.
+ * What is left is the one dead end automation creates: routing failed, and
+ * since no setting has moved nothing will retry on its own.
  */
-const primaryAction = computed(() =>
-  store.route
-    ? { label: t('anotherRoute'), shuffle: true, primary: false }
-    : { label: t('retryRoute'), shuffle: false, primary: true },
-)
-
-// While the first loop is being worked out there is nothing to retry and
-// nothing to re-roll, and the card below is already saying so.
-const showAction = computed(() => !!store.start && (!!store.route || !working.value))
+const showRetry = computed(() => !!store.start && !store.route && !working.value)
 
 // GPX and the demo are things you do with a route, not steps in making one,
 // so they sit behind the card's overflow rather than competing with Start.
@@ -504,17 +490,10 @@ const routeStats = computed(() => {
       />
     </label>
 
-    <button
-      v-if="showAction"
-      class="cta"
-      :class="{ secondary: !primaryAction.primary }"
-      @click="generate({ shuffle: primaryAction.shuffle })"
-    >
-      <svg v-if="primaryAction.shuffle" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-      <span>{{ primaryAction.label }}</span>
+    <!-- Only ever the way out of a failed route: with a loop on screen the
+         re-roll lives in the answer it re-rolls. -->
+    <button v-if="showRetry" class="cta" @click="generate()">
+      <span>{{ t('retryRoute') }}</span>
     </button>
 
     <!-- Progress belongs where the answer will be, not on a button: a button
@@ -585,13 +564,32 @@ const routeStats = computed(() => {
             </div>
           </div>
         </div>
-        <button class="nav-cta" @click="onStartNavigation()">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
-          </svg>
-          {{ t('navStart') }}
-        </button>
 
+        <!-- Set off along this one, or ask for another: the two things you can
+             say to a finished route, side by side. Setting off leads, in the
+             reading order and in the width — it is what the whole panel is for.
+             The re-roll used to be a full-width bar of its own above the card,
+             which on a phone came straight out of the map; here it costs no
+             height at all, and the pair reads as the answer's own controls. -->
+        <div class="card-actions">
+          <button class="nav-cta" @click="onStartNavigation()">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
+            </svg>
+            {{ t('navStart') }}
+          </button>
+          <button
+            class="reroll"
+            :aria-label="t('anotherRoute')"
+            :title="t('anotherRoute')"
+            @click="generate({ shuffle: true })"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
       </div>
     </Transition>
 
@@ -688,6 +686,7 @@ const routeStats = computed(() => {
 
 .panel {
   --handle-h: 30px;
+  --sheet-max: 68dvh;
 }
 
 @media (max-width: 760px) {
@@ -709,8 +708,12 @@ const routeStats = computed(() => {
     right: 0;
     bottom: 0;
     /* The sheet is always full height; collapsing slides it down so the
-       handle strip stays put. No scroll-position coupling, no lost handle. */
-    max-height: 78dvh;
+       handle strip stays put. No scroll-position coupling, no lost handle.
+       Ten points of it went back to the map: the planner draws as you set it
+       now, so the strip above an open sheet is where you judge the route, and
+       at 78 it was a letterbox. The sheet scrolls, and it can always be pushed
+       down — the map cannot be pulled up. */
+    max-height: var(--sheet-max);
     overflow: visible;
     border-radius: var(--radius) var(--radius) 0 0;
     transition: transform 0.42s cubic-bezier(0.3, 1, 0.3, 1);
@@ -745,7 +748,7 @@ const routeStats = computed(() => {
 
   .sheet-body {
     /* Only the body scrolls, so the handle can never scroll out of view. */
-    max-height: calc(78dvh - var(--handle-h));
+    max-height: calc(var(--sheet-max) - var(--handle-h));
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
@@ -1218,6 +1221,8 @@ const routeStats = computed(() => {
 }
 
 /* ---- CTA ---- */
+/* One state only now: the way out of a route that would not compute. Nothing
+   competes with it there, so it can be as loud as it likes. */
 .cta {
   display: flex;
   align-items: center;
@@ -1233,45 +1238,17 @@ const routeStats = computed(() => {
   transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
 }
 
-.cta:hover:not(:disabled) {
+.cta:hover {
   transform: translateY(-1px);
   filter: brightness(1.06);
 }
 
-/* With a route on screen the walk is the point, so this hands the accent —
-   and the only full-width green bar — over to Start navigation. */
-.cta.secondary {
-  padding: 12px 15px;
-  font-size: 15px;
-  color: var(--ink-1);
-  background: var(--surface-solid);
-  border: 1px solid var(--hairline);
-  box-shadow: none;
-}
-
-.cta.secondary:hover:not(:disabled) {
-  filter: none;
-  color: var(--accent-1);
-  border-color: var(--accent-1);
-}
-
-.cta.secondary svg {
-  width: 17px;
-  height: 17px;
-}
-
-.cta:active:not(:disabled) {
+.cta:active {
   transform: translateY(0);
 }
 
-.cta:disabled {
-  opacity: 0.75;
-  cursor: default;
-}
-
-/* Takes the button's own colour: this now spins on the quiet button too, every
-   time the slider settles, and a white ring on a pale surface is a button that
-   looks like it did nothing. */
+/* Takes its surroundings' colour: it spins on the muted plotting card, and a
+   white ring on a pale surface is a card that looks like it stalled. */
 .spinner {
   width: 17px;
   height: 17px;
@@ -1714,6 +1691,42 @@ const routeStats = computed(() => {
 }
 
 .more-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---- the answer's own two buttons ---- */
+.card-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.card-actions .nav-cta {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Square, so it reads as the smaller of the pair without being a tap you have
+   to aim at: same height as Start, which is more than a thumb is owed. */
+.reroll {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  border-radius: 14px;
+  color: var(--ink-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--hairline);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.reroll:hover {
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.reroll svg {
   width: 20px;
   height: 20px;
 }

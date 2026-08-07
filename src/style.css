@@ -27,6 +27,11 @@
     0 12px 32px -8px rgba(12, 17, 27, 0.22),
     0 32px 64px -24px rgba(12, 17, 27, 0.25);
   --radius: 24px;
+
+  /* The notch, in a form JavaScript can read: the map fits the route into the
+     canvas, which runs under the status bar, and env() is not available to it
+     any other way. */
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 :root[data-mode='bike'] {

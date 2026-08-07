@@ -104,13 +104,24 @@ function routeLat() {
   return store.route?.geometry.coordinates[0]?.[1] ?? store.start?.lngLat[1] ?? 52
 }
 
+/** How far the status bar reaches into the canvas, in CSS pixels. */
+function safeTop() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--safe-top')
+  const px = parseFloat(raw)
+  return Number.isFinite(px) ? px : 0
+}
+
 function fitPadding() {
-  // On mobile, fit into whatever strip the bottom sheet leaves visible. The
-  // sheet auto-collapses once a route arrives, so this is usually just the
-  // handle strip.
+  // On mobile, fit into whatever strip the bottom sheet leaves visible — and
+  // with the planner redrawing as you set it, that strip is now often the one
+  // above an open sheet rather than the near-full screen of a collapsed one.
+  // Every pixel of margin here came out of the little that was left: the frame
+  // was 70 and 40 deep on a strip barely 180 tall, so a third of the route's
+  // room went to whitespace. What the top still owes is the notch, which the
+  // canvas runs under and no amount of taste can make visible.
   const mobile = matchMedia('(max-width: 760px)').matches
   return mobile
-    ? { top: 70, left: 36, right: 36, bottom: (store.sheetInset || 46) + 40 }
+    ? { top: Math.round(safeTop()) + 18, left: 22, right: 22, bottom: (store.sheetInset || 46) + 14 }
     : { top: 90, left: 470, right: 90, bottom: 90 }
 }
 
