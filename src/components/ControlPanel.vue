@@ -174,7 +174,9 @@ async function onCheckUpdates() {
  * The generate button has two jobs, and saying which one it is about to do is
  * the whole point of it. With settings you have just changed, it applies them.
  * With settings untouched it would return the identical loop — the search
- * starts from the stored bearing — so there it rolls a new one instead.
+ * starts from the stored bearing — so there it rolls a new one instead, and
+ * says so: "another route" names the outcome, where "surprise me" only named
+ * a mood and left you to guess what pressing it would do.
  *
  * It also stops being the loudest thing on screen once a route exists: from
  * that moment the walk itself is what you came for, and two full-width green
@@ -183,7 +185,7 @@ async function onCheckUpdates() {
 const primaryAction = computed(() => {
   if (!store.route) return { label: t('createRoute'), shuffle: false, primary: true }
   if (routeStale()) return { label: t('regenerateRoute'), shuffle: false, primary: false }
-  return { label: t('surpriseMe'), shuffle: true, primary: false }
+  return { label: t('anotherRoute'), shuffle: true, primary: false }
 })
 
 // GPX and the demo are things you do with a route, not steps in making one,
