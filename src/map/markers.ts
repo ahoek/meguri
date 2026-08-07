@@ -16,10 +16,43 @@ interface WaypointHandlers {
 
 export function createMarkers(map: maplibregl.Map) {
   let start: maplibregl.Marker | null = null
+  let candidate: maplibregl.Marker | null = null
   let stops: maplibregl.Marker[] = []
   let draggedAt = 0
 
   return {
+    /**
+     * The ghost pin: where the start would go if you say yes. Its look does
+     * the talking — same shape as the real pin, none of its weight — and it
+     * takes no gestures of its own: tapping the map again moves it, the pill
+     * confirms or dismisses it.
+     *
+     * The visible pin lives one element deep: MapLibre positions the outer
+     * element with a transform of its own, so the settle animation needs an
+     * element nobody else is transforming. Re-run on every placement — the
+     * settle is the tap's receipt.
+     */
+    setCandidate(lngLat: LngLat) {
+      if (!candidate) {
+        const el = document.createElement('div')
+        const pin = document.createElement('div')
+        pin.className = 'start-marker candidate'
+        el.appendChild(pin)
+        candidate = new maplibregl.Marker({ element: el }).setLngLat(ll(lngLat)).addTo(map)
+      } else {
+        candidate.setLngLat(ll(lngLat))
+        const pin = candidate.getElement().firstElementChild as HTMLElement
+        pin.style.animation = 'none'
+        void pin.offsetWidth // flush, so removing the override restarts it
+        pin.style.animation = ''
+      }
+    },
+
+    removeCandidate() {
+      candidate?.remove()
+      candidate = null
+    },
+
     setStart(lngLat: LngLat, onDrag: (lngLat: LngLat) => void) {
       if (!start) {
         const el = document.createElement('div')

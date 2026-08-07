@@ -150,6 +150,35 @@ input {
   }
 }
 
+/* The proposed start: the same shape so it reads as "your pin, if you say
+   yes", with none of the real pin's weight — hollow, translucent, and pulsing
+   a touch quicker because it is a question waiting on an answer. It lands
+   with a small settle, the way anything set down should. */
+.start-marker.candidate {
+  background: color-mix(in srgb, var(--accent-1) 30%, #fff);
+  border-style: dashed;
+  border-color: var(--accent-1);
+  cursor: default;
+  animation: candidate-drop 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.start-marker.candidate::before {
+  animation-duration: 1.6s;
+}
+
+@keyframes candidate-drop {
+  from {
+    transform: translateY(-8px) scale(0.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .start-marker.candidate {
+    animation: none;
+  }
+}
+
 /* ---- waypoint markers ---- */
 /* Fixed colours: the map tiles stay light in both themes. */
 .wp-marker {

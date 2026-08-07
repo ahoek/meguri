@@ -10,7 +10,7 @@ import {
   setGreenNudger,
   setBuildingMeter,
   routeIfMissing,
-  showError,
+  proposeStart,
 } from '../app/store'
 import { distanceKm } from '../domain/geo'
 import {
@@ -466,15 +466,21 @@ onMounted(() => {
     } else if (!store.route) {
       setStart([e.lngLat.lng, e.lngLat.lat])
     } else {
-      // A tap is how you look at a map — pinch, pan, a finger that lands
-      // while judging the loop — and it was also the gesture that threw the
-      // loop away and moved its start. Standing work outranks a stray touch:
-      // with a route on screen, relocating takes an act that cannot happen by
-      // accident (dragging the pin, searching, locating). The toast says so,
-      // because a tap that silently does nothing reads as a broken app.
-      showError('hintMoveStart')
+      // Standing work outranks a stray touch: with a route on screen a tap
+      // only proposes — a ghost pin lands, a pill asks, and the loop is not
+      // thrown away until you say so. See proposeStart for the reasoning.
+      proposeStart([e.lngLat.lng, e.lngLat.lat])
     }
   })
+
+  // The ghost pin follows the proposal around and leaves with it.
+  watch(
+    () => store.startCandidate,
+    (candidate) => {
+      if (candidate) markers.setCandidate(candidate)
+      else markers.removeCandidate()
+    },
+  )
 
   watch(
     () => store.start,

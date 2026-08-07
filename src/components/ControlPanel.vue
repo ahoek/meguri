@@ -12,6 +12,8 @@ import {
   showError,
   clearWaypoints,
   removeWaypoint,
+  confirmStartCandidate,
+  dismissStartCandidate,
 } from '../app/store'
 import { shareGpx, canShareGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
@@ -135,6 +137,9 @@ const stopLabel = (index: number) =>
  */
 function setWaypointMode(on: boolean) {
   store.waypointMode = on
+  // Arming answers the open "start here?" question with a different plan:
+  // the taps are about to mean stops, so the ghost pin must not linger.
+  if (on) dismissStartCandidate()
   if (isMobile()) collapsed.value = on
 }
 
@@ -202,13 +207,30 @@ const routeStats = computed(() => {
   <!-- Dropping stops is a mode, and a mode you can't see is a mode you fight.
        This says what the map is doing and gives you the way out. -->
   <Transition name="pill">
-    <div v-if="store.waypointMode" class="wp-pill" :style="{ bottom: pillBottom }" role="status">
+    <div v-if="store.waypointMode" key="wp" class="wp-pill" :style="{ bottom: pillBottom }" role="status">
       <svg class="wp-pill-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
         <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
       </svg>
       <span class="wp-pill-text">{{ t('wpArmed') }}</span>
       <button @click="setWaypointMode(false)">{{ t('wpDone') }}</button>
+    </div>
+    <!-- The question a tap now asks instead of the damage it used to do: the
+         ghost pin stands where you tapped, this confirms or lets it go. One
+         pill at a time — waypoint mode never proposes starts, so they cannot
+         both be true. -->
+    <div v-else-if="store.startCandidate" key="start" class="wp-pill" :style="{ bottom: pillBottom }" role="status">
+      <svg class="wp-pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
+      </svg>
+      <span class="wp-pill-text">{{ t('moveStartQ') }}</span>
+      <button class="pill-quiet" :aria-label="t('dismiss')" @click="dismissStartCandidate()">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m7 7 10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button @click="confirmStartCandidate()">{{ t('moveStartYes') }}</button>
     </div>
   </Transition>
 
@@ -1440,6 +1462,23 @@ const routeStats = computed(() => {
   font-weight: 700;
   color: #fff;
   background: var(--accent-gradient);
+}
+
+/* The way out of the question, quieter than the answer beside it. */
+.wp-pill button.pill-quiet {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin-right: -4px;
+  color: var(--ink-3);
+  background: none;
+}
+
+.wp-pill .pill-quiet svg {
+  width: 15px;
+  height: 15px;
 }
 
 @media (min-width: 761px) {

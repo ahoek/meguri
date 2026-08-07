@@ -38,6 +38,8 @@ interface Store {
   routeSignature: string
   waypoints: LngLat[]
   waypointMode: boolean
+  /** A tapped spot waiting for "yes, start here" — see proposeStart. */
+  startCandidate: LngLat | null
 }
 
 export const SPEEDS: Record<Profile, number> = { walk: 4.8, bike: 16 } // km/h, for time → distance
@@ -154,6 +156,7 @@ export const store = reactive<Store>({
   bannerInset: 0, // px covered by the navigation banner; the map's controls duck under it
   waypoints: loadWaypoints(), // [lng, lat][] the loop must pass through
   waypointMode: false, // map taps add waypoints instead of moving the start
+  startCandidate: null,
   bearing: Math.random() * 360,
   clockwise: Math.random() < 0.5,
 })
@@ -366,12 +369,39 @@ export function targetKm(): number {
   return Math.max(1, (store.minutes[store.mode] / 60) * SPEEDS[store.mode])
 }
 
+/**
+ * A tap proposes; a second, deliberate press moves. With a route on screen a
+ * tap is mostly just how you handle a map — a pinch that lands as one finger,
+ * a nudge while judging the loop — and it used to be the same gesture that
+ * threw the loop away and moved its start. Dragging the pin survived as the
+ * accident-proof alternative, but a 22px grab target on glass, outdoors, is
+ * fine motor work. So the tap stays the way to point somewhere — it just
+ * stops being the commitment: a ghost pin lands where you tapped, a small
+ * pill asks, and tapping again simply moves the question.
+ */
+export function proposeStart(lngLat: LngLat) {
+  store.startCandidate = lngLat
+}
+
+export function confirmStartCandidate() {
+  const candidate = store.startCandidate
+  if (!candidate) return
+  setStart(candidate)
+}
+
+export function dismissStartCandidate() {
+  store.startCandidate = null
+}
+
 export function setStart(
   lngLat: LngLat,
   label: string | null = null,
   { fly = false, zoom = 14 } = {},
 ) {
   store.route = null
+  // However the start is being set — confirmed candidate, search, locate, a
+  // dragged pin — any open question about where to start is now answered.
+  store.startCandidate = null
   store.start = {
     lngLat,
     label: label || `${lngLat[1].toFixed(4)}, ${lngLat[0].toFixed(4)}`,
