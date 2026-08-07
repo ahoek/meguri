@@ -692,6 +692,16 @@ const routeStats = computed(() => {
     padding-right: env(safe-area-inset-right, 0px);
   }
 
+  /* Expanded, the grabber is only a hint. The whole sheet is the drag surface
+     by then, so the strip has no target to be — and at the collapsed size it
+     was fifty-four pixels of nothing above the first real thing on the sheet.
+     Collapsed it keeps its full height: there it *is* the target, and the one
+     the system's home swipe competes with. */
+  .panel:not(.collapsed) .sheet-top {
+    height: 28px;
+    padding-bottom: 0;
+  }
+
   .sheet-handle {
     display: flex;
     flex-direction: column;
