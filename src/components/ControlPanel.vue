@@ -14,6 +14,7 @@ import {
   removeWaypoint,
   confirmStartCandidate,
   dismissStartCandidate,
+  holdPlanner,
 } from '../app/store'
 import { shareGpx, canShareGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
@@ -575,6 +576,12 @@ const routeStats = computed(() => {
         <output class="target-value" for="target-slider">{{ targetLabel }}</output>
         <span class="target-hint">{{ targetHint }}</span>
       </div>
+      <!-- The planner waits for the thumb to lift: pointerdown holds it,
+           release (or the input's own change commit) lets it plan once for
+           where the drag ended. Range inputs capture their pointer, so the
+           pointerup lands here even when the finger has wandered off the
+           track. Keyboard nudges never hold — each arrow press is already a
+           committed value and takes the ordinary debounce. -->
       <input
         id="target-slider"
         v-model="sliderPos"
@@ -586,6 +593,10 @@ const routeStats = computed(() => {
         :style="{ '--fill': sliderPos + '%' }"
         :aria-label="store.targetType === 'distance' ? t('distanceAria') : t('durationAria')"
         :aria-valuetext="targetLabel"
+        @pointerdown="holdPlanner(true)"
+        @pointerup="holdPlanner(false)"
+        @pointercancel="holdPlanner(false)"
+        @change="holdPlanner(false)"
       />
     </div>
 

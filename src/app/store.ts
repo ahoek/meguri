@@ -279,6 +279,27 @@ const SETTLE_MS = { drag: 650, tap: 200 }
 let autoTimer: ReturnType<typeof setTimeout> | undefined
 
 /**
+ * A thumb on the slider holds the planner entirely. The debounce alone was
+ * not it: pause mid-drag for two thirds of a second — reading the estimate,
+ * thinking — and the recalculation started under your finger, ghosting the
+ * map for a distance you were never going to keep. While held, changes are
+ * noted rather than acted on; the release runs one plan for wherever the
+ * thumb ended up, still on the drag's own settle so a quick correction can
+ * catch it.
+ */
+let held = false
+let heldChanges = false
+
+export function holdPlanner(on: boolean) {
+  if (held === on) return
+  held = on
+  if (!on && heldChanges) {
+    heldChanges = false
+    scheduleRoute(SETTLE_MS.drag)
+  }
+}
+
+/**
  * Draw the loop the current settings describe, once they hold still.
  *
  * There is no button for this because there is no decision in it: a distance
@@ -286,6 +307,10 @@ let autoTimer: ReturnType<typeof setTimeout> | undefined
  * same question, and the one on the map should be the one you asked for.
  */
 function scheduleRoute(delayMs: number) {
+  if (held) {
+    heldChanges = true
+    return
+  }
   clearTimeout(autoTimer)
   // Said out loud from the first frame of the drag, not when the wait ends:
   // a panel that sits there for two thirds of a second looking like it missed
