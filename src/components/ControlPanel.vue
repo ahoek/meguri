@@ -372,12 +372,12 @@ const routeStats = computed(() => {
       <p v-else class="hint">{{ t('tapMapHint') }}</p>
 
       <div v-if="store.start" class="wp-block" :class="{ armed: store.waypointMode }">
-        <div class="wp-head">
-          <svg class="wp-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <div class="setting-row">
+          <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
             <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
           </svg>
-          <span class="wp-text">
+          <span class="setting-text">
             <strong>{{ t('wpLabel') }}</strong>
             <small>{{ wpHint }}</small>
           </span>
@@ -451,6 +451,24 @@ const routeStats = computed(() => {
       />
     </div>
 
+    <label class="setting-row nature-row">
+      <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3c-4 3.2-6.5 5-6.5 9a6.5 6.5 0 0 0 13 0c0-4-2.5-5.8-6.5-9z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M12 21v-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span class="setting-text">
+        <strong>{{ t('natureLabel') }}</strong>
+        <small>{{ store.nature ? t('natureOn') : t('natureOff') }}</small>
+      </span>
+      <input
+        class="switch"
+        type="checkbox"
+        role="switch"
+        :checked="store.nature"
+        @change="setNature(($event.target as HTMLInputElement).checked)"
+      />
+    </label>
+
     <button
       class="cta"
       :class="{ secondary: !primaryAction.primary }"
@@ -465,23 +483,6 @@ const routeStats = computed(() => {
       <span>{{ store.busy ? t('plotting') : primaryAction.label }}</span>
     </button>
 
-    <label class="nature-row">
-      <svg class="nature-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3c-4 3.2-6.5 5-6.5 9a6.5 6.5 0 0 0 13 0c0-4-2.5-5.8-6.5-9z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M12 21v-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-      <span class="nature-text">
-        <strong>{{ t('natureLabel') }}</strong>
-        <small>{{ store.nature ? t('natureOn') : t('natureOff') }}</small>
-      </span>
-      <input
-        class="switch"
-        type="checkbox"
-        role="switch"
-        :checked="store.nature"
-        @change="setNature(($event.target as HTMLInputElement).checked)"
-      />
-    </label>
 
     <Transition name="rise">
       <div v-if="routeStats" class="result-card">
@@ -592,6 +593,15 @@ const routeStats = computed(() => {
   flex-direction: column;
   gap: 18px;
   padding: 22px;
+}
+
+/* A flex column shrinks its children before it agrees to scroll, so a row
+   whose description ran to two lines was squeezed under its own text — the
+   nature row measured 52px around a 53px text column, and the second line
+   spilled towards the button below. Nothing in this panel should be
+   compressed to buy room; it scrolls instead. */
+.sheet-body > * {
+  flex: none;
 }
 
 @media (min-width: 761px) {
@@ -1198,27 +1208,22 @@ const routeStats = computed(() => {
 }
 
 /* ---- waypoints ---- */
-.wp-block {
-  display: flex;
-  flex-direction: column;
-  gap: 11px;
-  padding: 11px 13px 11px 15px;
-  border-radius: 15px;
-  background: var(--field);
-  transition: background 0.2s;
-}
-
-.wp-block.armed {
-  background: var(--accent-soft);
-}
-
-.wp-head {
+/* One grammar for anything that reads "here is a setting, here is its
+   control": icon, text, control, one height, a hairline to sit on. These were
+   two filled cards with icon-title-description inside them — visually
+   siblings, though one is an input and the other a preference, and they sat on
+   opposite sides of the button. Boxes were doing the grouping that spacing and
+   a rule can do more quietly. */
+.setting-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 52px;
+  padding: 9px 0;
+  border-top: 1px solid var(--hairline);
 }
 
-.wp-icon {
+.setting-icon {
   flex: none;
   width: 21px;
   height: 21px;
@@ -1226,11 +1231,7 @@ const routeStats = computed(() => {
   transition: color 0.2s;
 }
 
-.wp-block.armed .wp-icon {
-  color: var(--accent-1);
-}
-
-.wp-text {
+.setting-text {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1238,15 +1239,28 @@ const routeStats = computed(() => {
   min-width: 0;
 }
 
-.wp-text strong {
+.setting-text strong {
   font-size: 14.5px;
   font-weight: 600;
 }
 
-.wp-text small {
-  font-size: 12px;
+.setting-text small {
+  font-size: 12.5px;
   color: var(--ink-3);
+  line-height: 1.35;
 }
+
+.wp-block {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+
+.wp-block.armed .setting-icon {
+  color: var(--accent-1);
+}
+
 
 .wp-toggle {
   flex: none;
@@ -1405,49 +1419,14 @@ const routeStats = computed(() => {
 
 /* ---- nature toggle ---- */
 .nature-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 15px;
-  border-radius: 15px;
-  background: var(--field);
   cursor: pointer;
-  transition: background 0.2s;
 }
 
-.nature-row:has(.switch:checked) {
-  background: var(--accent-soft);
-}
 
-.nature-icon {
-  flex: none;
-  width: 21px;
-  height: 21px;
-  color: var(--ink-3);
-  transition: color 0.2s;
-}
-
-.nature-row:has(.switch:checked) .nature-icon {
+.nature-row:has(.switch:checked) .setting-icon {
   color: var(--accent-1);
 }
 
-.nature-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
-}
-
-.nature-text strong {
-  font-size: 14.5px;
-  font-weight: 600;
-}
-
-.nature-text small {
-  font-size: 12px;
-  color: var(--ink-3);
-}
 
 .switch {
   appearance: none;
