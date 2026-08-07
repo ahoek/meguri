@@ -90,10 +90,12 @@ const maneuverDistance = computed(() => {
   return formatDistance(metres)
 })
 
-const remaining = computed(() => {
-  const km = nav.remainingKm
+function formatKm(km: number) {
   return km >= 10 ? `${localNumber(km)} km` : `${localNumber(km, 1)} km`
-})
+}
+
+const remaining = computed(() => formatKm(nav.remainingKm))
+const covered = computed(() => formatKm(nav.alongKm))
 
 const eta = computed(() => {
   const minutes = Math.round(nav.remainingSec / 60)
@@ -206,14 +208,22 @@ onMounted(() => {
   if (bannerBodyEl.value) bannerObserver.observe(bannerBodyEl.value)
 
   measureDash()
-  dashObserver = new ResizeObserver(measureDash)
+  // The metric band's overflow moves with the wording (locale, "1 u 3 min"
+  // vs "57 min"), so the fades are re-judged whenever anything here resizes.
+  dashObserver = new ResizeObserver(() => {
+    measureDash()
+    updateMetricFades()
+  })
   if (dashEl.value) dashObserver.observe(dashEl.value)
   if (navEl.value) dashObserver.observe(navEl.value)
+  if (metricsEl.value) dashObserver.observe(metricsEl.value)
+  updateMetricFades()
 })
 
 onBeforeUnmount(() => {
   bannerObserver?.disconnect()
   dashObserver?.disconnect()
+  cancelAnimationFrame(fadeFrame)
   store.bannerInset = 0
 })
 
@@ -270,6 +280,44 @@ const progress = computed(() => {
   const total = nav.alongKm + nav.remainingKm
   return total ? Math.min(100, (nav.alongKm / total) * 100) : 0
 })
+
+/**
+ * Which of the banner's four faces is up. One key for the whole face, so a
+ * change crosses over as a single move — the old face slips out while the new
+ * one rises in — instead of icon and words each blinking on their own.
+ */
+const bannerState = computed(() => {
+  if (!nav.ready) return 'gps'
+  if (nav.arrived) return 'arrived'
+  if (nav.offRoute) return 'offroute'
+  return 'turn'
+})
+
+/**
+ * The dashboard carries four figures now, two in view; the band scroll-snaps
+ * to the rest. These classes drive the edge fades that say "there is more" —
+ * measured, because a mask that fades the last metric at the end of its own
+ * band would be saying it about nothing.
+ */
+const metricsEl = ref<HTMLElement | null>(null)
+const canLeft = ref(false)
+const canRight = ref(false)
+let fadeFrame = 0
+
+function updateMetricFades() {
+  const el = metricsEl.value
+  if (!el) return
+  canLeft.value = el.scrollLeft > 4
+  canRight.value = el.scrollLeft < el.scrollWidth - el.clientWidth - 4
+}
+
+function onMetricsScroll() {
+  if (fadeFrame) return
+  fadeFrame = requestAnimationFrame(() => {
+    fadeFrame = 0
+    updateMetricFades()
+  })
+}
 </script>
 
 <template>
@@ -336,16 +384,21 @@ const progress = computed(() => {
       :style="{ height: bannerH == null ? undefined : bannerH + 'px' }"
     >
       <div ref="bannerBodyEl" class="banner-body">
+      <!-- The whole face is keyed and crossed over as one: the leaver slips
+           out of flow (so the shell's eased height measures only the comer)
+           while the new face rises in on the sheet's own curve. -->
+      <Transition name="bstate">
+      <div :key="bannerState" class="banner-state">
       <!-- No usable fix — from the very first second, or after the phone has
            been away long enough that what's on screen is history. Admitting
            that outranks every other banner: a stale one states things that
            may no longer be true. -->
-      <template v-if="!nav.ready">
+      <template v-if="bannerState === 'gps'">
         <span class="gps-spinner" aria-hidden="true"></span>
         <p class="headline">{{ t('navWaitingGps') }}</p>
       </template>
 
-      <template v-else-if="nav.arrived">
+      <template v-else-if="bannerState === 'arrived'">
         <div class="finish-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="m5 12.5 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
@@ -354,7 +407,7 @@ const progress = computed(() => {
         <p class="headline">{{ t('navArrived') }}</p>
       </template>
 
-      <template v-else-if="nav.offRoute">
+      <template v-else-if="bannerState === 'offroute'">
         <div class="finish-icon warn-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="M12 8v5m0 3.5v.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
@@ -370,24 +423,41 @@ const progress = computed(() => {
       </template>
 
       <template v-else>
-        <svg class="turn" viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="TURN_PATHS[kind]" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-          <path v-if="ARROW_HEAD[kind]" :d="ARROW_HEAD[kind]" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <!-- A fixed slot, so the icon can change hands without the words
+             beside it shifting: the old arrow drops away as the new one
+             springs up in the same 52px. -->
+        <div class="turn-slot" aria-hidden="true">
+          <Transition name="turn-swap">
+            <svg :key="kind" class="turn" viewBox="0 0 24 24">
+              <path :d="TURN_PATHS[kind]" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+              <path v-if="ARROW_HEAD[kind]" :d="ARROW_HEAD[kind]" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </Transition>
+        </div>
         <div class="instruction">
           <span class="distance">{{ maneuverDistance }}</span>
-          <span class="turn-text">{{ t(`nav_${kind}`) }}</span>
+          <!-- Old and new wording share one grid cell while they cross, so
+               the line never collapses mid-swap and the banner holds still. -->
+          <span class="turn-text-slot">
+            <Transition name="text-swap">
+              <span :key="kind" class="turn-text">{{ t(`nav_${kind}`) }}</span>
+            </Transition>
+          </span>
           <!-- The second half of a double turn, so one look at the fork is
                enough and the phone can go back in your pocket. -->
-          <span v-if="thenKind" class="then">
-            <svg class="then-turn" viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="TURN_PATHS[thenKind]" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-              <path v-if="ARROW_HEAD[thenKind]" :d="ARROW_HEAD[thenKind]" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            {{ t('navThen') }} {{ t(`nav_${thenKind}`) }}
-          </span>
+          <Transition name="then-rise">
+            <span v-if="thenKind" class="then">
+              <svg class="then-turn" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="TURN_PATHS[thenKind]" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                <path v-if="ARROW_HEAD[thenKind]" :d="ARROW_HEAD[thenKind]" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              {{ t('navThen') }} {{ t(`nav_${thenKind}`) }}
+            </span>
+          </Transition>
         </div>
       </template>
+      </div>
+      </Transition>
       </div>
     </div>
 
@@ -508,16 +578,43 @@ const progress = computed(() => {
       <div class="progress" role="presentation">
         <div class="progress-fill" :style="{ width: progress + '%' }"></div>
       </div>
+      <!-- Four figures, two in view, the band snapping to the rest. The pair
+           you care about is the pair you leave it on — the scroll position is
+           a setting you make by swiping. The arrival time used to be a 12px
+           caption under the estimate; in glare that is the same as absent, so
+           every figure here now gets the full-size treatment. -->
       <div class="dash-row">
-        <div class="metric">
-          <span class="metric-value">{{ remaining }}</span>
-          <span class="metric-label">{{ t('navRemaining') }}</span>
+        <div
+          ref="metricsEl"
+          class="metrics"
+          :class="{ 'can-left': canLeft, 'can-right': canRight }"
+          @scroll.passive="onMetricsScroll"
+        >
+          <div class="metric">
+            <span class="metric-value">{{ remaining }}</span>
+            <span class="metric-label">{{ t('navRemaining') }}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value">{{ arrivalClock }}</span>
+            <span class="metric-label">{{ t('navArrive') }}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value">{{ eta }}</span>
+            <span class="metric-label">{{ t('navDuration') }}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value">{{ covered }}</span>
+            <span class="metric-label">{{ t('navCovered') }}</span>
+          </div>
         </div>
-        <div class="metric">
-          <span class="metric-value">{{ eta }}</span>
-          <span class="metric-label">{{ arrivalClock }}</span>
-        </div>
-        <button class="exit-btn" @click="stopNavigation">{{ t('navExit') }}</button>
+        <!-- The words moved into the label; the red square is the one symbol
+             every screen agrees means stop, and the width it gives back is
+             width the figures spend on being legible. -->
+        <button class="exit-btn" :aria-label="t('navExit')" :title="t('navExit')" @click="stopNavigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
+          </svg>
+        </button>
       </div>
     </div>
     </div>
@@ -526,6 +623,11 @@ const progress = computed(() => {
 
 <style scoped>
 .nav {
+  /* The panel's shared motion voice: the sheet's settle for things that
+     arrive, the planner's spring for things that pop. One vocabulary, so a
+     banner changing faces and a pill rising read as the same app moving. */
+  --ease-out-soft: cubic-bezier(0.3, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.3, 1.2);
   position: absolute;
   inset: 0;
   z-index: 20;
@@ -555,6 +657,68 @@ const progress = computed(() => {
 }
 
 
+/* ---- arrival choreography ----
+   Starting navigation replaces the whole screen; the pieces arrive as one
+   move rather than blinking on. The banner comes down to meet you, the dash
+   and its buttons rise from where the sheet just was, a beat apart — the
+   sheet's own settle curve, so the handover reads as the same surface
+   changing jobs. */
+.banner {
+  animation: nav-drop 0.5s var(--ease-out-soft) both;
+}
+
+.dash {
+  animation: nav-rise 0.5s 0.05s var(--ease-out-soft) both;
+}
+
+.side-actions {
+  animation: nav-rise 0.5s 0.12s var(--ease-out-soft) both;
+}
+
+.demo-strip {
+  animation: nav-fade 0.35s 0.2s ease both;
+}
+
+@keyframes nav-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+@keyframes nav-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
+@keyframes nav-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner,
+  .dash,
+  .side-actions,
+  .demo-strip {
+    animation: none;
+  }
+
+  .bstate-enter-active,
+  .bstate-leave-active,
+  .turn-swap-enter-active,
+  .turn-swap-leave-active,
+  .text-swap-enter-active,
+  .text-swap-leave-active,
+  .then-rise-enter-active,
+  .then-rise-leave-active {
+    transition: none;
+  }
+}
+
 /* ---- instruction banner ---- */
 .banner {
   margin: calc(12px + env(safe-area-inset-top))
@@ -572,11 +736,41 @@ const progress = computed(() => {
 }
 
 .banner-body {
+  position: relative;
+  padding: 16px 20px;
+  min-height: 84px;
+}
+
+.banner-state {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 20px;
-  min-height: 84px;
+  width: 100%;
+}
+
+/* Changing faces: the leaver steps out of flow (so the shell's eased height
+   only ever measures the comer) and fades fast; the comer rises in on the
+   spring. Entering navigation, the banner itself drops in from the top —
+   see the arrival choreography below. */
+.bstate-enter-active {
+  transition: opacity 0.3s ease, transform 0.34s var(--ease-spring);
+}
+
+.bstate-leave-active {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  right: 20px;
+  transition: opacity 0.16s ease;
+}
+
+.bstate-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.bstate-leave-to {
+  opacity: 0;
 }
 
 .banner.warn {
@@ -587,10 +781,38 @@ const progress = computed(() => {
   background: linear-gradient(105deg, #047857, #16a34a);
 }
 
-.turn {
+/* The icon changes hands inside a fixed slot, so the words beside it never
+   shift: the old arrow drops away while the new one springs up in place. */
+.turn-slot {
+  position: relative;
   flex: none;
   width: 52px;
   height: 52px;
+}
+
+.turn {
+  position: absolute;
+  inset: 0;
+  width: 52px;
+  height: 52px;
+}
+
+.turn-swap-enter-active {
+  transition: opacity 0.26s ease, transform 0.3s var(--ease-spring);
+}
+
+.turn-swap-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.turn-swap-enter-from {
+  opacity: 0;
+  transform: translateY(10px) scale(0.7);
+}
+
+.turn-swap-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.85);
 }
 
 .instruction {
@@ -600,47 +822,90 @@ const progress = computed(() => {
 }
 
 .distance {
-  font-size: 32px;
+  font-size: 35px;
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-.turn-text {
-  font-size: 16px;
-  font-weight: 600;
-  opacity: 0.95;
+/* Both wordings share the one grid cell while they cross, so the line keeps
+   its height and the banner underneath it holds still. */
+.turn-text-slot {
+  display: grid;
 }
 
-/* The follow-up turn: present, clearly secondary, readable at arm's length. */
+.turn-text {
+  grid-area: 1 / 1;
+  /* Outdoor size: 16px was fine on a desk and gone in the sun. */
+  font-size: 19px;
+  font-weight: 650;
+  opacity: 0.97;
+}
+
+.text-swap-enter-active {
+  transition: opacity 0.24s ease, transform 0.28s var(--ease-spring);
+}
+
+.text-swap-leave-active {
+  transition: opacity 0.14s ease;
+}
+
+.text-swap-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.text-swap-leave-to {
+  opacity: 0;
+}
+
+/* The follow-up turn: clearly secondary, but "secondary" outdoors still has
+   to survive glare — it was 14.5px at 0.82, which survived neither. */
 .then {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   margin-top: 5px;
-  font-size: 14.5px;
+  font-size: 16.5px;
   font-weight: 600;
-  opacity: 0.82;
+  opacity: 0.92;
 }
 
 .then-turn {
   flex: none;
-  width: 17px;
-  height: 17px;
+  width: 19px;
+  height: 19px;
+}
+
+.then-rise-enter-active {
+  transition: opacity 0.3s ease 0.08s, transform 0.3s var(--ease-spring) 0.08s;
+}
+
+.then-rise-leave-active {
+  transition: opacity 0.15s ease;
+}
+
+.then-rise-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.then-rise-leave-to {
+  opacity: 0;
 }
 
 .rejoin-dist {
   display: block;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
-  opacity: 0.9;
+  opacity: 0.92;
   font-variant-numeric: tabular-nums;
 }
 
 .headline {
   margin: 0;
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -699,18 +964,79 @@ const progress = computed(() => {
 .dash-row {
   display: flex;
   align-items: center;
+  gap: 14px;
+  padding: 14px 16px 14px 18px;
+}
+
+/* The band: two figures in view, snapping to the rest, scrollbar hidden —
+   the fades below are the affordance instead. */
+.metrics {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   gap: 20px;
-  padding: 14px 18px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  /* The band bleeds left under the dash's own padding and snaps just past
+     it, so the left fade lands on run-off, never on the figure you snapped
+     to — its first digit was being ghosted before this. */
+  margin-left: -18px;
+  padding-left: 18px;
+  scroll-padding-left: 18px;
+  --fade-l: 0px;
+  --fade-r: 0px;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 var(--fade-l),
+    #000 calc(100% - var(--fade-r)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 var(--fade-l),
+    #000 calc(100% - var(--fade-r)),
+    transparent 100%
+  );
+}
+
+.metrics::-webkit-scrollbar {
+  display: none;
+}
+
+/* Measured, not guessed: a fade over the end of the band would be promising
+   more where there is none, so each edge only softens while something is
+   actually hidden past it. */
+.metrics.can-left {
+  --fade-l: 18px;
+}
+
+.metrics.can-right {
+  --fade-r: 30px;
 }
 
 .metric {
-  min-width: 0;
+  flex: none;
+  scroll-snap-align: start;
+  /* Just under half the band each, so the third figure peeks through the
+     right-hand fade — the ghosted sliver is what says "swipe". A wide value
+     ("2 u 59 min") simply takes more and the band scrolls further. */
+  min-width: calc(50% - 32px);
   display: flex;
   flex-direction: column;
 }
 
+/* The band pages in pairs: a swipe is "show me the other two", so only the
+   odd figures are snap stops and a gesture never strands the view straddling
+   a pair. */
+.metric:nth-child(even) {
+  scroll-snap-align: none;
+}
+
 .metric-value {
-  font-size: 31px;
+  font-size: 33px;
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.1;
@@ -718,9 +1044,11 @@ const progress = computed(() => {
   white-space: nowrap;
 }
 
+/* The caption was 12px in the theme's faintest grey — outdoors that reads as
+   decoration at best. It stays a caption, one shade and one size up. */
 .metric-label {
-  font-size: 12px;
-  color: var(--ink-3);
+  font-size: 13px;
+  color: var(--ink-2);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
@@ -973,13 +1301,24 @@ const progress = computed(() => {
 }
 
 .exit-btn {
-  margin-left: auto;
-  padding: 12px 18px;
-  border-radius: 13px;
-  font-size: 15px;
-  font-weight: 700;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   color: #fff;
   background: #dc2626;
+  transition: filter 0.2s;
+}
+
+.exit-btn:hover {
+  filter: brightness(1.08);
+}
+
+.exit-btn svg {
+  width: 21px;
+  height: 21px;
 }
 
 @media (min-width: 761px) {
