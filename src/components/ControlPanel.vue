@@ -451,8 +451,22 @@ const routeStats = computed(() => {
 
     <label class="setting-row nature-row">
       <span class="setting-text">
-        <strong>{{ t('natureLabel') }}</strong>
-        <small>{{ store.nature ? t('natureOn') : t('natureOff') }}</small>
+        <!-- The leaf follows the words rather than leading them: every line on
+             this sheet starts at one left edge, and an icon in front of the
+             title is what used to break it. Here it reads as part of the
+             label, and greens when the preference is on. -->
+        <strong class="nature-title">
+          {{ t('natureLabel') }}
+          <svg class="nature-leaf" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3c-4 3.2-6.5 5-6.5 9a6.5 6.5 0 0 0 13 0c0-4-2.5-5.8-6.5-9z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M12 21v-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </strong>
+        <!-- Describes the setting, not its state: the switch says whether it
+             is on, and a sub-line that swapped a long string for a short one
+             changed the row's height by seventeen pixels every time it was
+             toggled — invisible at 375px, plain on a narrower phone. -->
+        <small>{{ t('natureHint') }}</small>
       </span>
       <input
         class="switch"
@@ -912,15 +926,19 @@ const routeStats = computed(() => {
   gap: 9px;
 }
 
-/* Sentence case, like everything else on the sheet. The caps were the only
-   raised voice in the panel, and they were shouting the two words the user
-   least needs shouted — with the spacing above doing the grouping, a quiet
-   label is enough to name a section. */
-.label {
-  font-size: 12.5px;
+/* Every label in the panel now looks the same, whether it names a section or
+   a single row. They were two sizes and two colours before, and the smaller,
+   greyer one was the section header — so "Tussenstops" outranked "Startpunt",
+   the group it sits inside, and "Liever natuur dan stad" read as louder than
+   either. Which of them is a section is the spacing's job to say, not the
+   type's. Sentence case, since the copy was always written that way and only
+   the CSS was raising its voice. */
+.label,
+.setting-text strong {
+  font-size: 14.5px;
   font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--ink-3);
+  letter-spacing: -0.005em;
+  color: var(--ink-1);
 }
 
 .label-row {
@@ -1243,10 +1261,7 @@ const routeStats = computed(() => {
   min-width: 0;
 }
 
-.setting-text strong {
-  font-size: 14.5px;
-  font-weight: 600;
-}
+
 
 .setting-text small {
   font-size: 12.5px;
@@ -1421,6 +1436,26 @@ const routeStats = computed(() => {
 /* ---- nature toggle ---- */
 .nature-row {
   cursor: pointer;
+}
+
+.nature-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nature-leaf {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  color: var(--ink-3);
+  opacity: 0.7;
+  transition: color 0.25s, opacity 0.25s, transform 0.25s;
+}
+
+.nature-row:has(.switch:checked) .nature-leaf {
+  color: var(--accent-1);
+  opacity: 1;
 }
 
 
