@@ -9,6 +9,7 @@ import {
   removeWaypoint,
   setGreenNudger,
   setBuildingMeter,
+  routeIfMissing,
 } from '../app/store'
 import { distanceKm } from '../domain/geo'
 import {
@@ -405,6 +406,11 @@ onMounted(() => {
     // A restored session is already in the store before the style finishes
     // loading, so paint it here rather than waiting for a change event.
     if (store.route) drawRoute(store.route)
+    // A start carried over from last time, with no route beside it, is a
+    // planner waiting on a button that no longer exists. This is also the
+    // earliest moment worth planning from: the green nudger reads landcover
+    // out of loaded tiles, and before now there are none.
+    else routeIfMissing()
     if (nav.active) enterNavigation()
   })
 

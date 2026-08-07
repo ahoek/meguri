@@ -239,13 +239,10 @@ watch(
 /**
  * What the route on screen was built from.
  *
- * The generate button has two jobs and they are not the same job: apply
- * settings you have just changed, or roll a different loop from the settings
- * as they stand. Re-running with untouched settings returns the identical
- * loop — the search starts from the stored bearing — so a button offering
- * "update" there is a button that does nothing. Comparing this signature
- * against the current one tells the two apart, so the button can say which
- * it is about to do.
+ * Every setting a loop is planned from, and nothing else. The bearing is
+ * deliberately absent: it is what makes two loops from identical settings
+ * different, and re-running without changing it returns the same loop back.
+ * So this is what says whether there is any work to do.
  */
 function inputSignature(): string {
   return JSON.stringify([
@@ -259,8 +256,60 @@ function inputSignature(): string {
 }
 
 /** True when the settings have moved on from the route being shown. */
-export function routeStale(): boolean {
+function routeStale(): boolean {
   return !!store.route && store.routeSignature !== inputSignature()
+}
+
+/**
+ * How long a change is left to settle before the planner acts on it.
+ *
+ * A slider is dragged, not set: it emits a value a frame, and each of those
+ * values would otherwise cost brouter.de a loop search of up to eleven
+ * requests. Everything else on the sheet is a single tap, where the same wait
+ * is only lag in front of a map that has just gone blank.
+ */
+const SETTLE_MS = { drag: 650, tap: 200 }
+
+let autoTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
+ * Draw the loop the current settings describe, once they hold still.
+ *
+ * There is no button for this because there is no decision in it: a distance
+ * you have changed and a route that predates it are simply two answers to the
+ * same question, and the one on the map should be the one you asked for.
+ */
+function scheduleRoute(delayMs: number) {
+  clearTimeout(autoTimer)
+  autoTimer = setTimeout(() => {
+    if (!store.start || nav.active) return
+    // Moved and moved back inside the wait: the settings the route was built
+    // from are the settings as they stand, so there is nothing to redraw.
+    if (store.route && !routeStale()) return
+    void generate()
+  }, delayMs)
+}
+
+// The length is the dragged one. A mode switch moves it too — each profile
+// keeps its own distance — but that watcher runs second and reschedules at tap
+// speed, which is what a tap deserves.
+watch(targetKm, () => scheduleRoute(SETTLE_MS.drag))
+watch(
+  () => [store.mode, store.targetType, store.nature, store.start?.lngLat, store.waypoints],
+  () => scheduleRoute(SETTLE_MS.tap),
+  { deep: true },
+)
+
+/**
+ * A start with no route gets one, unasked.
+ *
+ * Called by the map once its tiles are in rather than at mount: the green
+ * nudger can only see landcover that has loaded, so a loop planned before then
+ * quietly ignores the preference that asked for it.
+ */
+export function routeIfMissing() {
+  if (!store.start || store.route || nav.active) return
+  void generate()
 }
 
 /**

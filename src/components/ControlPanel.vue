@@ -12,7 +12,6 @@ import {
   showError,
   clearWaypoints,
   removeWaypoint,
-  routeStale,
 } from '../app/store'
 import { shareGpx, canShareGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
@@ -38,17 +37,32 @@ const {
   onSheetTouchEnd,
 } = useBottomSheet()
 
-watch(
-  () => store.route,
-  (route) => {
-    if (route && isMobile()) collapsed.value = true
-  },
-)
+/**
+ * The sheet gets out of the way once a new starting point has its route: that
+ * is the moment there is something on the map worth looking at, and on a phone
+ * the sheet is what the map is under.
+ *
+ * Only then. The planner redraws on every change now, and those later routes
+ * arrive while you are still working the controls — a sheet that slid shut
+ * under your thumb each time the slider settled would be unusable. It also no
+ * longer springs open when the start moves: with nothing left to press, a tap
+ * on the map used to open the sheet over the very thing it had just changed.
+ */
+let revealOnRoute = false
 
 watch(
   () => store.start,
   () => {
-    collapsed.value = false
+    revealOnRoute = true
+  },
+)
+
+watch(
+  () => store.route,
+  (route) => {
+    if (!route) return
+    if (revealOnRoute && isMobile()) collapsed.value = true
+    revealOnRoute = false
   },
 )
 
@@ -171,22 +185,22 @@ async function onCheckUpdates() {
 }
 
 /**
- * The generate button has two jobs, and saying which one it is about to do is
- * the whole point of it. With settings you have just changed, it applies them.
- * With settings untouched it would return the identical loop — the search
- * starts from the stored bearing — so there it rolls a new one instead, and
- * says so: "another route" names the outcome, where "surprise me" only named
- * a mood and left you to guess what pressing it would do.
+ * One job left. Applying a setting is not something to press for any more —
+ * the loop redraws itself as the settings move — so what remains is the one
+ * thing the settings cannot ask for: a different loop from the same numbers.
+ * The search starts from a stored bearing, so this rolls a new one, and the
+ * label names that outcome rather than a mood.
  *
- * It also stops being the loudest thing on screen once a route exists: from
- * that moment the walk itself is what you came for, and two full-width green
- * bars arguing about it is how the panel got confusing.
+ * It stays quiet next to the route it belongs to: once a loop is on screen the
+ * walk is what you came for, and two full-width green bars arguing about that
+ * is how the panel got confusing. Before any route exists it is the loud one —
+ * which by then means there is no starting point yet, and pressing it says so.
  */
-const primaryAction = computed(() => {
-  if (!store.route) return { label: t('createRoute'), shuffle: false, primary: true }
-  if (routeStale()) return { label: t('regenerateRoute'), shuffle: false, primary: false }
-  return { label: t('anotherRoute'), shuffle: true, primary: false }
-})
+const primaryAction = computed(() =>
+  store.route
+    ? { label: t('anotherRoute'), shuffle: true, primary: false }
+    : { label: t('createRoute'), shuffle: false, primary: true },
+)
 
 // GPX and the demo are things you do with a route, not steps in making one,
 // so they sit behind the card's overflow rather than competing with Start.
