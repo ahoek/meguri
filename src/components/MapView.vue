@@ -10,6 +10,7 @@ import {
   setGreenNudger,
   setBuildingMeter,
   routeIfMissing,
+  showError,
 } from '../app/store'
 import { distanceKm } from '../domain/geo'
 import {
@@ -462,8 +463,16 @@ onMounted(() => {
     if (nav.active) return // tapping the map must not relocate the route
     if (store.waypointMode && store.start) {
       addWaypoint([e.lngLat.lng, e.lngLat.lat])
-    } else {
+    } else if (!store.route) {
       setStart([e.lngLat.lng, e.lngLat.lat])
+    } else {
+      // A tap is how you look at a map — pinch, pan, a finger that lands
+      // while judging the loop — and it was also the gesture that threw the
+      // loop away and moved its start. Standing work outranks a stray touch:
+      // with a route on screen, relocating takes an act that cannot happen by
+      // accident (dragging the pin, searching, locating). The toast says so,
+      // because a tap that silently does nothing reads as a broken app.
+      showError('hintMoveStart')
     }
   })
 

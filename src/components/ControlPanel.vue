@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import {
   store,
   RANGES,
@@ -37,34 +37,13 @@ const {
   onSheetTouchEnd,
 } = useBottomSheet()
 
-/**
- * The sheet gets out of the way once a new starting point has its route: that
- * is the moment there is something on the map worth looking at, and on a phone
- * the sheet is what the map is under.
- *
- * Only then. The planner redraws on every change now, and those later routes
- * arrive while you are still working the controls — a sheet that slid shut
- * under your thumb each time the slider settled would be unusable. It also no
- * longer springs open when the start moves: with nothing left to press, a tap
- * on the map used to open the sheet over the very thing it had just changed.
- */
-let revealOnRoute = false
-
-watch(
-  () => store.start,
-  () => {
-    revealOnRoute = true
-  },
-)
-
-watch(
-  () => store.route,
-  (route) => {
-    if (!route) return
-    if (revealOnRoute && isMobile()) collapsed.value = true
-    revealOnRoute = false
-  },
-)
+// The sheet never collapses itself. It used to slide shut the moment a new
+// start got its route, which was right when the button was the way to ask for
+// one — the route was the end of the sheet's usefulness. Now the settings keep
+// working on the loop as long as they are on screen: a route landing is the
+// reason to *stay*, moving the slider or re-rolling against the map above.
+// Only arming waypoint mode still moves it (below), because that mode asks for
+// taps on the very thing the sheet covers. Pushing it down is yours to do.
 
 function pickResult(result: { lngLat: LngLat; label: string }) {
   resetSearch()
@@ -258,10 +237,18 @@ const routeStats = computed(() => {
       >
         <span class="grabber" aria-hidden="true"></span>
       </button>
-      <!-- The sheet collapses as soon as a route lands, so starting must not
-           require digging the result card back out. The figures open the sheet
-           like the grabber does — they are a summary of what is inside it. -->
-      <div v-if="collapsed && routeStats" class="strip-row" :class="{ working }">
+      <!-- Pushed down, the strip is the whole app: whatever the sheet would be
+           saying has to fit in it. While the planner works it says so — a stop
+           dropped in waypoint mode recomputes the loop with the sheet down, and
+           this used to happen nowhere you could see. With an answer, its
+           figures open the sheet like the grabber does — they are a summary of
+           what is inside it — and starting must not require digging the card
+           back out. -->
+      <div v-if="collapsed && working" class="strip-row strip-plotting" role="status">
+        <span class="spinner" aria-hidden="true"></span>
+        {{ t('plotting') }}
+      </div>
+      <div v-else-if="collapsed && routeStats" class="strip-row">
         <button class="mini-stats" :aria-label="t('panelToggle')" @click="collapsed = false">
           {{ routeStats.distance }} · {{ routeStats.duration }}
         </button>
@@ -720,13 +707,15 @@ const routeStats = computed(() => {
     will-change: transform;
   }
 
-  /* The strip only needs to be button-sized while it is carrying one — and
-     when it is, that button is the whole point of the screen: the route is
-     drawn, the map is full height, and the one thing left to do is set off.
-     It was 31 px tall and 7 px off the bottom of the glass, which is under
-     the 44 px a thumb is owed and inside the strip the system itself claims
-     for the home swipe — so half the taps that missed weren't the user's. */
-  .panel:has(.mini-start) {
+  /* The strip only needs to be button-sized while it is carrying content —
+     and when it is, that content is the whole point of the screen: the route
+     is drawn, the map is full height, and the one thing left to do is set
+     off. It was 31 px tall and 7 px off the bottom of the glass, which is
+     under the 44 px a thumb is owed and inside the strip the system itself
+     claims for the home swipe — so half the taps that missed weren't the
+     user's. On any strip content, not just the start button: the plotting
+     notice swapping in must not bounce the strip's height. */
+  .panel:has(.strip-row) {
     --handle-strip: 68px;
   }
 
@@ -837,8 +826,11 @@ const routeStats = computed(() => {
     opacity: 0.55;
   }
 
+  /* The same voice as the start button beside it: these two are the strip's
+     whole message, and at 13.5px the figures read as a caption to the button
+     rather than the other half of the answer. */
   .mini-stats {
-    font-size: 13.5px;
+    font-size: 15.5px;
     font-weight: 700;
     letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
@@ -846,6 +838,15 @@ const routeStats = computed(() => {
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+  }
+
+  /* The working notice, in the room the figures usually hold. */
+  .strip-plotting {
+    justify-content: flex-start;
+    gap: 11px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-2);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1600,12 +1601,6 @@ const routeStats = computed(() => {
   .spinner {
     animation-duration: 2.4s;
   }
-}
-
-/* The collapsed strip carries the same figures, so it says the same thing. */
-.strip-row.working {
-  opacity: 0.45;
-  pointer-events: none;
 }
 
 .stats {
