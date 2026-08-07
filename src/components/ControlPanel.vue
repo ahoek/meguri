@@ -185,15 +185,6 @@ const working = computed(() => store.pending || store.busy)
  */
 const showRetry = computed(() => !!store.start && !store.route && !working.value)
 
-// GPX and the demo are things you do with a route, not steps in making one,
-// so they sit behind the card's overflow rather than competing with Start.
-const moreOpen = ref(false)
-
-function withMenuClosed(fn: () => void) {
-  moreOpen.value = false
-  fn()
-}
-
 const routeStats = computed(() => {
   if (!store.route) return null
   return {
@@ -259,43 +250,62 @@ const routeStats = computed(() => {
       >
         <span class="grabber" aria-hidden="true"></span>
       </button>
-      <!-- Pushed down, the strip is the whole app: whatever the sheet would be
-           saying has to fit in it. While the planner works it says so — a stop
-           dropped in waypoint mode recomputes the loop with the sheet down, and
-           this used to happen nowhere you could see. With an answer, its
-           figures open the sheet like the grabber does — they are a summary of
-           what is inside it — and starting must not require digging the card
-           back out. -->
-      <div v-if="collapsed && working" class="strip-row strip-plotting" role="status">
-        <!-- The brand mark plotting its own loop: the walker dot goes round
-             while the gradient arc draws long and short behind it, the way
-             the route is being worked out behind the walk. Borrows the
-             header svg's gradient; under reduced motion the attributes win
-             and it is simply the logo standing still. -->
-        <svg class="loop-spin" viewBox="0 0 48 48" aria-hidden="true">
-          <circle
-            class="arc"
-            cx="24" cy="24" r="15"
-            fill="none" stroke="url(#brand-g)" stroke-width="7"
-            stroke-linecap="round" stroke-dasharray="70 25"
-            transform="rotate(120 24 24)"
-          />
-          <circle class="dot" cx="24" cy="39" r="5" fill="var(--ink)" />
-        </svg>
-        {{ t('plotting') }}
-      </div>
-      <div v-else-if="collapsed && routeStats" class="strip-row">
-        <button class="mini-stats" :aria-label="t('panelToggle')" @click="collapsed = false">
-          <span>{{ routeStats.distance }}</span>
-          <span>{{ routeStats.duration }}</span>
-        </button>
-        <button class="mini-start" @click="onStartNavigation()">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
+      <!-- The answer, in the one place it lives. This bar is every state the
+           planner's outcome can be in — being worked out, worked out, or
+           failed — pinned to the sheet's rim on a phone (visible with the
+           sheet up or down: you drag the slider and watch the answer change
+           above it) and to the panel's foot on a desktop. It used to be
+           three different surfaces showing up at different moments: a result
+           card deep in the sheet, a strip row when collapsed, and plotting
+           variants of each. -->
+      <Transition name="answer-swap" mode="out-in">
+        <div v-if="store.start && working" key="plotting" class="answer answer-plotting" role="status">
+          <!-- The brand mark plotting its own loop: the walker dot goes
+               round while the gradient arc draws long and short behind it,
+               the way the route is being worked out behind the walk. Borrows
+               the header svg's gradient; under reduced motion the attributes
+               win and it is simply the logo standing still. -->
+          <svg class="loop-spin" viewBox="0 0 48 48" aria-hidden="true">
+            <circle
+              class="arc"
+              cx="24" cy="24" r="15"
+              fill="none" stroke="url(#brand-g)" stroke-width="7"
+              stroke-linecap="round" stroke-dasharray="70 25"
+              transform="rotate(120 24 24)"
+            />
+            <circle class="dot" cx="24" cy="39" r="5" fill="var(--ink)" />
           </svg>
-          {{ t('navStart') }}
-        </button>
-      </div>
+          {{ t('plotting') }}
+        </div>
+        <div v-else-if="routeStats" key="route" class="answer">
+          <button class="answer-stats" :aria-label="t('panelToggle')" @click="collapsed = !collapsed">
+            <span>{{ routeStats.distance }}</span>
+            <span>{{ routeStats.duration }}</span>
+          </button>
+          <button
+            class="reroll"
+            :aria-label="t('anotherRoute')"
+            :title="t('anotherRoute')"
+            @click="generate({ shuffle: true })"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button class="nav-cta" @click="onStartNavigation()">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
+            </svg>
+            {{ t('navStart') }}
+          </button>
+        </div>
+        <div v-else-if="showRetry" key="retry" class="answer">
+          <!-- The one dead end automation creates: routing failed, no setting
+               has moved, nothing will retry on its own. -->
+          <button class="retry-cta" @click="generate()">{{ t('retryRoute') }}</button>
+        </div>
+      </Transition>
     </div>
 
     <div class="sheet-body">
@@ -514,117 +524,33 @@ const routeStats = computed(() => {
       />
     </label>
 
-    <!-- Only ever the way out of a failed route: with a loop on screen the
-         re-roll lives in the answer it re-rolls. -->
-    <button v-if="showRetry" class="cta" @click="generate()">
-      <span>{{ t('retryRoute') }}</span>
-    </button>
-
-    <!-- Progress belongs where the answer will be, not on a button: a button
-         is something you do, and this is something being done for you. With no
-         figures yet there is nothing to fade, so it takes the card's shape and
-         says what is happening. -->
-    <div v-if="working && !routeStats" class="plotting" role="status">
-      <svg class="loop-spin" viewBox="0 0 48 48" aria-hidden="true">
-        <circle
-          class="arc"
-          cx="24" cy="24" r="15"
-          fill="none" stroke="url(#brand-g)" stroke-width="7"
-          stroke-linecap="round" stroke-dasharray="70 25"
-          transform="rotate(120 24 24)"
-        />
-        <circle class="dot" cx="24" cy="39" r="5" fill="var(--ink)" />
-      </svg>
-      {{ t('plotting') }}
+    <!-- Things you do *with* a route rather than *to* it. They used to hide
+         behind a dot menu on the result card; with the answer consolidated
+         into the bar they take a quiet row of their own, worded and weighted
+         like the other secondary controls on this sheet. -->
+    <div v-if="routeStats" class="route-extras">
+      <!-- Share sheet where there is one — that is how the loop reaches a
+           watch, a head unit, or another route app — and a plain download
+           where there isn't. The glyph says which. -->
+      <button @click="shareGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk'))">
+        <svg v-if="sharesGpx" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v6.5h14V13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        {{ t('gpx') }}
+      </button>
+      <!-- Walks the loop on its own, so navigation can be shown without going
+           outside. A deliberate tap, never a gesture, and the DEMO stamp
+           stays on screen the whole time. -->
+      <button @click="onStartNavigation(true)">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 5.5v13l11-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        {{ t('demo') }}
+      </button>
     </div>
-
-    <Transition name="rise">
-      <div v-if="routeStats" class="result-card" :class="{ working }" :aria-busy="working">
-        <div class="result-head">
-          <div class="stats">
-            <div class="stat">
-              <span class="stat-value">{{ routeStats.distance }}</span>
-              <span class="stat-label">{{ t('distance') }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">{{ routeStats.duration }}</span>
-              <span class="stat-label">{{ store.mode === 'bike' ? t('estRideTime') : t('estWalkTime') }}</span>
-            </div>
-          </div>
-          <div class="more-wrap">
-            <button
-              class="more-btn"
-              :aria-label="t('moreActions')"
-              :title="t('moreActions')"
-              aria-haspopup="menu"
-              :aria-expanded="moreOpen"
-              @click="moreOpen = !moreOpen"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="5" cy="12" r="1.8" fill="currentColor" />
-                <circle cx="12" cy="12" r="1.8" fill="currentColor" />
-                <circle cx="19" cy="12" r="1.8" fill="currentColor" />
-              </svg>
-            </button>
-            <div v-if="moreOpen" class="more-backdrop" @click="moreOpen = false"></div>
-            <div v-if="moreOpen" class="more-menu" role="menu">
-              <!-- Share sheet where there is one — that is how the loop reaches
-                   a watch, a head unit, or another route app — and a plain
-                   download where there isn't. The glyph says which, so the item
-                   does not promise a download and open a sheet. -->
-              <button
-                role="menuitem"
-                @click="withMenuClosed(() => shareGpx(store.route!, t(store.mode === 'bike' ? 'gpxRide' : 'gpxWalk')))"
-              >
-                <svg v-if="sharesGpx" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 15V4m0 0L8 8m4-4 4 4M5 13v6.5h14V13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 3v11m0 0 -4 -4m4 4 4-4M4.5 20h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                {{ t('gpx') }}
-              </button>
-              <!-- Walks the loop on its own, so navigation can be shown without
-                   going outside. A deliberate tap, never a gesture, and the
-                   DEMO stamp stays on screen the whole time — a fake GPS you
-                   cannot see you have switched on is worse than no fake GPS. -->
-              <button role="menuitem" @click="withMenuClosed(() => onStartNavigation(true))">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M8 5.5v13l11-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                {{ t('demo') }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Set off along this one, or ask for another: the two things you can
-             say to a finished route, side by side. Setting off leads, in the
-             reading order and in the width — it is what the whole panel is for.
-             The re-roll used to be a full-width bar of its own above the card,
-             which on a phone came straight out of the map; here it costs no
-             height at all, and the pair reads as the answer's own controls. -->
-        <div class="card-actions">
-          <button class="nav-cta" @click="onStartNavigation()">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
-            </svg>
-            {{ t('navStart') }}
-          </button>
-          <button
-            class="reroll"
-            :aria-label="t('anotherRoute')"
-            :title="t('anotherRoute')"
-            @click="generate({ shuffle: true })"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </Transition>
 
     <p class="build-stamp">
       {{ build }} ·
@@ -711,10 +637,38 @@ const routeStats = computed(() => {
     overflow-y: auto;
     overscroll-behavior: contain;
   }
+
+  /* The same answer bar, at the panel's foot: the settings scroll, the
+     answer stays. `order` keeps one DOM for both layouts — on a phone the
+     bar rides the sheet's rim instead. */
+  .sheet-top {
+    display: flex;
+    flex-direction: column;
+    order: 1;
+    flex: none;
+    border-top: 1px solid var(--hairline);
+  }
+
+  .sheet-top:not(:has(.answer)) {
+    display: none;
+  }
+
+  .sheet-handle {
+    display: none;
+  }
+
+  .answer {
+    padding: 14px 22px;
+  }
 }
 
+/* The answer bar's home in both layouts; the sweep clips to its edge. The
+   display is each layout's own business — the two media blocks partition
+   every width between them, and a `display: none` here would outrank the
+   earlier desktop block on source order alone. */
 .sheet-top {
-  display: none;
+  position: relative;
+  overflow: hidden;
 }
 
 .panel {
@@ -753,16 +707,13 @@ const routeStats = computed(() => {
     will-change: transform;
   }
 
-  /* The strip only needs to be button-sized while it is carrying content —
+  /* The strip only needs room while the answer bar is carrying content —
      and when it is, that content is the whole point of the screen: the route
      is drawn, the map is full height, and the one thing left to do is set
-     off. It was 31 px tall and 7 px off the bottom of the glass, which is
-     under the 44 px a thumb is owed and inside the strip the system itself
-     claims for the home swipe — so half the taps that missed weren't the
-     user's. On any strip content, not just the start button: the plotting
-     notice swapping in must not bounce the strip's height. */
-  .panel:has(.strip-row) {
-    --handle-strip: 68px;
+     off. Whatever face the bar shows, the strip keeps one height, so a state
+     swap never bounces it. */
+  .panel:has(.answer) {
+    --handle-strip: 78px;
   }
 
   .panel {
@@ -803,13 +754,12 @@ const routeStats = computed(() => {
     padding-right: env(safe-area-inset-right, 0px);
   }
 
-  /* Expanded, the grabber is only a hint. The whole sheet is the drag surface
-     by then, so the strip has no target to be — and at the collapsed size it
-     was fifty-four pixels of nothing above the first real thing on the sheet.
-     Collapsed it keeps its full height: there it *is* the target, and the one
-     the system's home swipe competes with. */
+  /* Expanded, the strip sheds its home-indicator clearance (it sits at the
+     top of the sheet then, nowhere near the system's swipe band) but keeps
+     the answer bar: that is the consolidation — the answer rides the rim,
+     visible above the settings that produce it, whichever way the sheet is. */
   .panel:not(.collapsed) .sheet-top {
-    height: 28px;
+    height: auto;
     padding-bottom: 0;
   }
 
@@ -824,44 +774,11 @@ const routeStats = computed(() => {
     touch-action: none;
   }
 
-  /* With a summary below it the grabber takes only its own line; alone, the
+  /* With an answer below it the grabber takes only its own line; alone, the
      handle keeps the whole strip so any tap on it opens the sheet. */
-  .sheet-top:has(.strip-row) .sheet-handle {
+  .sheet-top:has(.answer) .sheet-handle {
     flex: none;
     height: 22px;
-  }
-
-  .strip-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex: 1;
-    min-width: 0;
-    padding-left: 16px;
-    padding-right: 14px;
-  }
-
-  .mini-start {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    flex: none;
-    min-height: 46px;
-    padding: 0 20px;
-    border-radius: 14px;
-    font-size: 15.5px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: #fff;
-    background: var(--accent-gradient);
-    box-shadow: 0 8px 20px -7px var(--accent-1);
-  }
-
-  .mini-start svg {
-    width: 17px;
-    height: 17px;
   }
 
   .grabber {
@@ -872,45 +789,13 @@ const routeStats = computed(() => {
     opacity: 0.55;
   }
 
-  /* These figures are the other half of the strip's message, not a caption
-     to the button beside them — and they are read outdoors, at arm's length,
-     mid-stride. 15.5px was still caption-sized next to a 46px button; this
-     matches the dashboard's own weight. No separator: the units already end
-     one figure and start the other, so a clear gap says the same thing a
-     middot did without adding ink between two numbers being read at a
-     glance. */
-  .mini-stats {
-    display: flex;
-    align-items: baseline;
-    gap: 13px;
-    font-size: 18.5px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-    background: var(--accent-gradient);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+  .answer {
+    padding: 0 14px 10px;
   }
 
-  /* The working notice, in the room the figures usually hold. Its sweep does
-     not live here: it runs along the sheet's own top edge (see .sheet-top
-     below), where an edge actually is. */
-  .strip-plotting {
-    justify-content: flex-start;
-    gap: 12px;
-    font-size: 14.5px;
-    font-weight: 600;
-    color: var(--ink-2);
-  }
-
-  /* Anchors the sweep to the collapsed sheet's top edge and clips it to the
-     glass's own rounded corners, so the bar travels the rim rather than
-     hovering somewhere on the surface. */
+  /* Clips the sweep to the glass's own rounded corners, so the bar travels
+     the rim rather than hovering somewhere on the surface. */
   .sheet-top {
-    position: relative;
-    overflow: hidden;
     border-radius: var(--radius) var(--radius) 0 0;
   }
 
@@ -1286,31 +1171,188 @@ const routeStats = computed(() => {
   box-shadow: 0 2px 8px rgba(12, 17, 27, 0.28);
 }
 
-/* ---- CTA ---- */
-/* One state only now: the way out of a route that would not compute. Nothing
-   competes with it there, so it can be as loud as it likes. */
-.cta {
+/* ---- the answer bar ---- */
+/* One row, three faces (plotting, route, retry), one home. Every face keeps
+   to the same 46px line so a state swap never moves the rim it sits on. */
+.answer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+}
+
+.answer-plotting {
+  gap: 12px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+/* The figures lead, and they are read outdoors, at arm's length, mid-stride:
+   the distance carries the strip's voice, the estimate reads as its caption.
+   Tapping them is tapping the summary of the sheet — it toggles it. */
+.answer-stats {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.answer-stats span:first-child {
+  font-size: 18.5px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.answer-stats span:last-child {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-cta {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 15px;
-  border-radius: 15px;
-  font-size: 16px;
+  gap: 8px;
+  flex: none;
+  min-height: 46px;
+  padding: 0 18px;
+  border-radius: 14px;
+  font-size: 15.5px;
   font-weight: 700;
+  letter-spacing: -0.01em;
   color: #fff;
   background: var(--accent-gradient);
-  box-shadow: 0 8px 22px -6px var(--accent-1);
-  transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
+  box-shadow: 0 8px 20px -7px var(--accent-1);
+  transition: transform 0.15s, filter 0.2s;
 }
 
-.cta:hover {
+.nav-cta:hover {
   transform: translateY(-1px);
   filter: brightness(1.06);
 }
 
-.cta:active {
-  transform: translateY(0);
+.nav-cta svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* Square, so it reads as the smaller of the pair without being a tap you
+   have to aim at: same height as Start, which is more than a thumb is owed. */
+.reroll {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  color: var(--ink-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--hairline);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.reroll:hover {
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.reroll svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* The one dead end automation creates; nothing competes with it, so it can
+   be as loud as it likes. */
+.retry-cta {
+  flex: 1;
+  min-height: 46px;
+  border-radius: 14px;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent-gradient);
+  box-shadow: 0 8px 20px -7px var(--accent-1);
+  transition: transform 0.15s, filter 0.2s;
+}
+
+.retry-cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+/* The sweep runs along the rim the bar lives on — the sheet's top edge on a
+   phone, the bar's own top border on a desktop — bright enough to be seen
+   over a busy map: three pixels and a glow, not a hairline. */
+.sheet-top:has(.answer-plotting)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 44%;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--accent-gradient);
+  box-shadow: 0 0 12px 1.5px var(--accent-1);
+  animation: sweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Faces crossing over: quick, and on the panel's own spring. */
+.answer-swap-enter-active {
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.answer-swap-leave-active {
+  transition: opacity 0.12s ease;
+}
+
+.answer-swap-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.answer-swap-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-top:has(.answer-plotting)::before {
+    width: 100%;
+    animation: none;
+  }
+
+  /* Still, the mark is simply the logo standing beside the words: with the
+     animations off, the svg's own attributes carry the brand arc. */
+  .loop-spin,
+  .loop-spin .arc,
+  .loop-spin .dot {
+    animation: none;
+  }
+
+  .answer-swap-enter-active,
+  .answer-swap-leave-active {
+    transition: none;
+  }
 }
 
 /* The working glyph: the brand mark plotting its own loop. The svg turns at
@@ -1639,262 +1681,37 @@ const routeStats = computed(() => {
   transform: translateX(19px);
 }
 
-/* ---- result ---- */
-.result-card {
-  position: relative;
-  overflow: hidden;
+/* ---- things you do with a route ---- */
+/* The wp-toggle's grammar: quiet chips, secondary weight, nothing arguing
+   with the answer bar. */
+.route-extras {
   display: flex;
-  flex-direction: column;
-  gap: 13px;
-  padding: 16px;
-  border-radius: 17px;
-  background: var(--accent-soft);
-  border: 1px solid var(--hairline);
+  gap: 8px;
 }
 
-/* The figures are an answer, and while the next one is being worked out they
-   are the previous question's. So they fade and stop being touchable — you
-   cannot set off along a route that is being replaced under you — but they
-   stay put: blanking the card would move everything below it every time the
-   slider settled. The bar is what makes the fade read as work rather than as
-   something switched off; it sits on the card itself, so it keeps its colour
-   while the contents lose theirs. */
-.result-card.working > * {
-  opacity: 0.42;
-}
-
-.result-card.working {
-  pointer-events: none;
-}
-
-/* The sweep always runs along an edge something owns — the top edge of the
-   card it is about, or (collapsed) the top edge of the sheet itself. A bar
-   floating at some y in the middle of the glass reads as debris. */
-.result-card.working::before,
-.plotting::before,
-.sheet-top:has(.strip-plotting)::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 38%;
-  height: 2px;
-  background: var(--accent-gradient);
-  animation: sweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-@keyframes sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(300%);
-  }
-}
-
-/* Same shape and place as the card it stands in for, so the panel does not
-   jump when the figures arrive. */
-.plotting {
-  position: relative;
-  overflow: hidden;
+.route-extras button {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 16px;
-  border-radius: 17px;
-  background: var(--field);
-  border: 1px solid var(--hairline);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .result-card.working::before,
-  .plotting::before,
-  .sheet-top:has(.strip-plotting)::before {
-    width: 100%;
-    animation: none;
-  }
-
-  /* Still, the mark is simply the logo standing beside the words: with the
-     animations off, the svg's own attributes carry the brand arc. */
-  .loop-spin,
-  .loop-spin .arc,
-  .loop-spin .dot {
-    animation: none;
-  }
-}
-
-.stats {
-  display: flex;
-  gap: 26px;
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
-}
-
-.stat-value {
-  font-size: 21px;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The same role as .label, so it gets the same voice. */
-.stat-label {
-  font-size: 12px;
-  color: var(--ink-3);
-  letter-spacing: 0.01em;
-}
-
-.nav-cta {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  padding: 13px;
-  border-radius: 14px;
-  font-size: 15.5px;
-  font-weight: 700;
-  color: #fff;
-  background: var(--accent-gradient);
-  box-shadow: 0 8px 22px -6px var(--accent-1);
-  transition: transform 0.15s, filter 0.2s;
-}
-
-.nav-cta:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.06);
-}
-
-.nav-cta svg {
-  width: 18px;
-  height: 18px;
-}
-
-.result-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-/* Everything you can do *with* a route rather than *to* it. A dot menu keeps
-   them one tap away without giving export and a GPS simulator the same weight
-   as setting off. */
-.more-wrap {
-  position: relative;
-  flex: none;
-}
-
-.more-btn {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  color: var(--ink-2);
-  border: 1px solid transparent;
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
-}
-
-.more-btn:hover,
-.more-btn[aria-expanded='true'] {
-  color: var(--ink-1);
-  background: var(--field);
-  border-color: var(--hairline);
-}
-
-.more-btn svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* ---- the answer's own two buttons ---- */
-.card-actions {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-
-.card-actions .nav-cta {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Square, so it reads as the smaller of the pair without being a tap you have
-   to aim at: same height as Start, which is more than a thumb is owed. */
-.reroll {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 48px;
-  border-radius: 14px;
   color: var(--ink-2);
   background: var(--surface-solid);
   border: 1px solid var(--hairline);
   transition: color 0.2s, border-color 0.2s;
 }
 
-.reroll:hover {
+.route-extras button:hover {
   color: var(--accent-1);
   border-color: var(--accent-1);
 }
 
-.reroll svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* Sits above the tap that opened it, so the menu itself is never under a
-   finger that is still on the screen. */
-.more-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-}
-
-.more-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 2;
-  min-width: 150px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border-radius: 14px;
-  background: var(--surface-solid);
-  border: 1px solid var(--hairline);
-  box-shadow: 0 16px 34px -12px rgba(6, 10, 18, 0.7);
-}
-
-.more-menu button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink-1);
-  text-align: left;
-  transition: background 0.15s;
-}
-
-.more-menu button:hover {
-  background: var(--field);
-}
-
-.more-menu svg {
-  width: 17px;
-  height: 17px;
+.route-extras svg {
+  width: 16px;
+  height: 16px;
   flex: none;
-  color: var(--ink-2);
 }
 
 .build-stamp {
@@ -1914,14 +1731,5 @@ const routeStats = computed(() => {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-.rise-enter-active {
-  transition: opacity 0.35s, transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-}
-
-.rise-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
 }
 </style>
