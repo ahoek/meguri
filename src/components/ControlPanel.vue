@@ -232,6 +232,9 @@ const routeStats = computed(() => {
     @touchcancel="onSheetTouchEnd"
   >
     <div ref="sheetTopEl" class="sheet-top">
+      <!-- The grabber is the sheet's own affordance, so it keeps its place
+           whatever the sheet is carrying: its own row, across the full width,
+           above anything else in the strip. -->
       <button
         class="sheet-handle"
         :aria-expanded="!collapsed"
@@ -239,18 +242,21 @@ const routeStats = computed(() => {
         @click="collapsed = !collapsed"
       >
         <span class="grabber" aria-hidden="true"></span>
-        <span v-if="collapsed && routeStats" class="mini-stats">
-          {{ routeStats.distance }} · {{ routeStats.duration }}
-        </span>
       </button>
       <!-- The sheet collapses as soon as a route lands, so starting must not
-           require digging the result card back out. -->
-      <button v-if="collapsed && routeStats" class="mini-start" @click="onStartNavigation()">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
-        </svg>
-        {{ t('navStart') }}
-      </button>
+           require digging the result card back out. The figures open the sheet
+           like the grabber does — they are a summary of what is inside it. -->
+      <div v-if="collapsed && routeStats" class="strip-row">
+        <button class="mini-stats" :aria-label="t('panelToggle')" @click="collapsed = false">
+          {{ routeStats.distance }} · {{ routeStats.duration }}
+        </button>
+        <button class="mini-start" @click="onStartNavigation()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
+          </svg>
+          {{ t('navStart') }}
+        </button>
+      </div>
     </div>
 
     <div class="sheet-body">
@@ -652,7 +658,7 @@ const routeStats = computed(() => {
      the 44 px a thumb is owed and inside the strip the system itself claims
      for the home swipe — so half the taps that missed weren't the user's. */
   .panel:has(.mini-start) {
-    --handle-strip: 66px;
+    --handle-strip: 68px;
   }
 
   .panel {
@@ -683,7 +689,8 @@ const routeStats = computed(() => {
 
   .sheet-top {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     flex: none;
     height: var(--handle-h);
     /* Keep the grabber and buttons clear of the home indicator. */
@@ -704,15 +711,31 @@ const routeStats = computed(() => {
 
   .sheet-handle {
     display: flex;
-    flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    gap: 4px;
+    padding-top: 9px;
     flex: 1;
-    align-self: stretch;
     min-width: 0;
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
+  }
+
+  /* With a summary below it the grabber takes only its own line; alone, the
+     handle keeps the whole strip so any tap on it opens the sheet. */
+  .sheet-top:has(.strip-row) .sheet-handle {
+    flex: none;
+    height: 22px;
+  }
+
+  .strip-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    padding-left: 16px;
+    padding-right: 14px;
   }
 
   .mini-start {
@@ -722,7 +745,6 @@ const routeStats = computed(() => {
     gap: 8px;
     flex: none;
     min-height: 46px;
-    margin-right: 14px;
     padding: 0 20px;
     border-radius: 14px;
     font-size: 15.5px;
