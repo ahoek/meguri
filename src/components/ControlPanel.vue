@@ -181,12 +181,32 @@ const working = computed(() => store.pending || store.busy)
  * request happened to finish on, then jumped it home.
  */
 const logoSpinning = ref(false)
+const rimActive = ref(false)
+
 watch(working, (w) => {
-  if (w) logoSpinning.value = true
+  if (w && store.start) {
+    logoSpinning.value = true
+    rimActive.value = true
+  }
 })
 
-function onLogoLap() {
+function onLogoLap(e: AnimationEvent) {
+  // Only the full lap counts. The dot's steps and the arc's trace bubble
+  // their own iteration events up to the svg — the dot's every *half* lap —
+  // and stopping on one of those froze the mark mid-turn: the "sometimes"
+  // in "sometimes it snaps" was whichever boundary happened to come first.
+  if (!e.animationName.startsWith('spin')) return
   if (!working.value) logoSpinning.value = false
+}
+
+/**
+ * The rim light finishes its pass the same way: at its iteration boundary
+ * the segment stands entirely off-path (the cycle runs from before the left
+ * corner to past the right), so unmounting there is invisible — where
+ * unmounting the moment the work ended cut the light off mid-edge.
+ */
+function onRimPass() {
+  if (!working.value) rimActive.value = false
 }
 
 /**
@@ -320,12 +340,13 @@ const routeStats = computed(() => {
       <!-- The rim light: a path along the sheet's actual top edge, corners
            included, that the working segment travels end to end. -->
       <svg
-        v-if="store.start && working && rimPath"
+        v-if="rimActive && rimPath"
         class="rim-sweep"
         :width="rim.w"
         :height="rim.r + 4"
         :viewBox="`0 0 ${rim.w} ${rim.r + 4}`"
         aria-hidden="true"
+        @animationiteration="onRimPass"
       >
         <path :d="rimPath" pathLength="100" fill="none" stroke="url(#brand-g)" stroke-width="3" stroke-linecap="round" />
       </svg>
