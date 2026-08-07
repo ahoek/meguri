@@ -267,7 +267,21 @@ const routeStats = computed(() => {
            what is inside it — and starting must not require digging the card
            back out. -->
       <div v-if="collapsed && working" class="strip-row strip-plotting" role="status">
-        <span class="spinner" aria-hidden="true"></span>
+        <!-- The brand mark plotting its own loop: the walker dot goes round
+             while the gradient arc draws long and short behind it, the way
+             the route is being worked out behind the walk. Borrows the
+             header svg's gradient; under reduced motion the attributes win
+             and it is simply the logo standing still. -->
+        <svg class="loop-spin" viewBox="0 0 48 48" aria-hidden="true">
+          <circle
+            class="arc"
+            cx="24" cy="24" r="15"
+            fill="none" stroke="url(#brand-g)" stroke-width="7"
+            stroke-linecap="round" stroke-dasharray="70 25"
+            transform="rotate(120 24 24)"
+          />
+          <circle class="dot" cx="24" cy="39" r="5" fill="var(--ink)" />
+        </svg>
         {{ t('plotting') }}
       </div>
       <div v-else-if="collapsed && routeStats" class="strip-row">
@@ -511,7 +525,16 @@ const routeStats = computed(() => {
          figures yet there is nothing to fade, so it takes the card's shape and
          says what is happening. -->
     <div v-if="working && !routeStats" class="plotting" role="status">
-      <span class="spinner" aria-hidden="true"></span>
+      <svg class="loop-spin" viewBox="0 0 48 48" aria-hidden="true">
+        <circle
+          class="arc"
+          cx="24" cy="24" r="15"
+          fill="none" stroke="url(#brand-g)" stroke-width="7"
+          stroke-linecap="round" stroke-dasharray="70 25"
+          transform="rotate(120 24 24)"
+        />
+        <circle class="dot" cx="24" cy="39" r="5" fill="var(--ink)" />
+      </svg>
       {{ t('plotting') }}
     </div>
 
@@ -871,13 +894,24 @@ const routeStats = computed(() => {
     color: transparent;
   }
 
-  /* The working notice, in the room the figures usually hold. */
+  /* The working notice, in the room the figures usually hold. Its sweep does
+     not live here: it runs along the sheet's own top edge (see .sheet-top
+     below), where an edge actually is. */
   .strip-plotting {
     justify-content: flex-start;
-    gap: 11px;
-    font-size: 14px;
+    gap: 12px;
+    font-size: 14.5px;
     font-weight: 600;
     color: var(--ink-2);
+  }
+
+  /* Anchors the sweep to the collapsed sheet's top edge and clips it to the
+     glass's own rounded corners, so the bar travels the rim rather than
+     hovering somewhere on the surface. */
+  .sheet-top {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius) var(--radius) 0 0;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1279,20 +1313,52 @@ const routeStats = computed(() => {
   transform: translateY(0);
 }
 
-/* Takes its surroundings' colour: it spins on the muted plotting card, and a
-   white ring on a pale surface is a card that looks like it stalled. */
-.spinner {
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  border: 2.5px solid color-mix(in srgb, currentColor 30%, transparent);
-  border-top-color: currentColor;
-  animation: spin 0.8s linear infinite;
+/* The working glyph: the brand mark plotting its own loop. The svg turns at
+   a walker's pace while the arc inside draws itself long and shrinks back —
+   the route being worked out behind the walk — and the dot takes its little
+   steps. The dash keyframes end one full circumference (r=15 → 94.25) from
+   where they began, so the cycle has no seam. */
+.loop-spin {
+  flex: none;
+  width: 21px;
+  height: 21px;
+  animation: spin 1.4s linear infinite;
+}
+
+.loop-spin .arc {
+  animation: trace 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.loop-spin .dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dot-step 0.7s ease-in-out infinite;
 }
 
 @keyframes spin {
   to {
     transform: rotate(1turn);
+  }
+}
+
+@keyframes trace {
+  0% {
+    stroke-dasharray: 5 89.25;
+    stroke-dashoffset: 0;
+  }
+  55% {
+    stroke-dasharray: 68 26.25;
+    stroke-dashoffset: -24;
+  }
+  100% {
+    stroke-dasharray: 5 89.25;
+    stroke-dashoffset: -94.25;
+  }
+}
+
+@keyframes dot-step {
+  50% {
+    transform: scale(0.8);
   }
 }
 
@@ -1601,8 +1667,12 @@ const routeStats = computed(() => {
   pointer-events: none;
 }
 
+/* The sweep always runs along an edge something owns — the top edge of the
+   card it is about, or (collapsed) the top edge of the sheet itself. A bar
+   floating at some y in the middle of the glass reads as debris. */
 .result-card.working::before,
-.plotting::before {
+.plotting::before,
+.sheet-top:has(.strip-plotting)::before {
   content: '';
   position: absolute;
   top: 0;
@@ -1641,13 +1711,18 @@ const routeStats = computed(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .result-card.working::before,
-  .plotting::before {
+  .plotting::before,
+  .sheet-top:has(.strip-plotting)::before {
     width: 100%;
     animation: none;
   }
 
-  .spinner {
-    animation-duration: 2.4s;
+  /* Still, the mark is simply the logo standing beside the words: with the
+     animations off, the svg's own attributes carry the brand arc. */
+  .loop-spin,
+  .loop-spin .arc,
+  .loop-spin .dot {
+    animation: none;
   }
 }
 
