@@ -378,6 +378,7 @@ export function createRouteLayers(map: maplibregl.Map) {
   // moves to another latitude, or a new route stops doubling back.
   let lat = 0
   let lanes = false
+  let workingFrame = 0
 
   function applyLanes() {
     const offset = lanes ? groundOffset(LANE_OFFSET_M, lat) : 0
@@ -584,6 +585,42 @@ export function createRouteLayers(map: maplibregl.Map) {
 
     clearRoute() {
       source('route')?.setData(EMPTY)
+    },
+
+    /**
+     * The line on the map is the stale answer while the planner works, and it
+     * is also the one part of the planner that is always in view — the sheet's
+     * own progress card scrolls out of sight exactly when the sheet is open.
+     * So the route itself says it: it ghosts, and breathes slowly while the
+     * new loop is being worked out. A breath rather than a blink — the map
+     * underneath must stay readable, it is what you are aiming the loop at.
+     * Under reduced motion the breath stops and only the ghosting remains.
+     */
+    setWorking(on: boolean) {
+      cancelAnimationFrame(workingFrame)
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+      const apply = (line: number, casing: number, arrows: number) => {
+        if (map.getLayer('route-line')) map.setPaintProperty('route-line', 'line-opacity', line)
+        if (map.getLayer('route-casing')) map.setPaintProperty('route-casing', 'line-opacity', casing)
+        if (map.getLayer('route-arrows')) map.setPaintProperty('route-arrows', 'icon-opacity', arrows)
+      }
+      if (!on) {
+        apply(1, 0.9, 1)
+        return
+      }
+      if (still) {
+        apply(0.4, 0.35, 0.3)
+        return
+      }
+      const start = performance.now()
+      const breathe = (now: number) => {
+        // 0.3–0.5, a slow ~2.4s cycle.
+        const phase = ((now - start) / 2400) * Math.PI * 2
+        const level = 0.4 + Math.sin(phase) * 0.1
+        apply(level, level * 0.9, level * 0.75)
+        workingFrame = requestAnimationFrame(breathe)
+      }
+      workingFrame = requestAnimationFrame(breathe)
     },
 
     // Rounded on the same terms as the route under it, or the grey would cut

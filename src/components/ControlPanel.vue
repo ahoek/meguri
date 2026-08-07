@@ -272,7 +272,8 @@ const routeStats = computed(() => {
       </div>
       <div v-else-if="collapsed && routeStats" class="strip-row">
         <button class="mini-stats" :aria-label="t('panelToggle')" @click="collapsed = false">
-          {{ routeStats.distance }} · {{ routeStats.duration }}
+          <span>{{ routeStats.distance }}</span>
+          <span>{{ routeStats.duration }}</span>
         </button>
         <button class="mini-start" @click="onStartNavigation()">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -848,13 +849,21 @@ const routeStats = computed(() => {
     opacity: 0.55;
   }
 
-  /* The same voice as the start button beside it: these two are the strip's
-     whole message, and at 13.5px the figures read as a caption to the button
-     rather than the other half of the answer. */
+  /* These figures are the other half of the strip's message, not a caption
+     to the button beside them — and they are read outdoors, at arm's length,
+     mid-stride. 15.5px was still caption-sized next to a 46px button; this
+     matches the dashboard's own weight. No separator: the units already end
+     one figure and start the other, so a clear gap says the same thing a
+     middot did without adding ink between two numbers being read at a
+     glance. */
   .mini-stats {
-    font-size: 15.5px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    display: flex;
+    align-items: baseline;
+    gap: 13px;
+    font-size: 18.5px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
     background: var(--accent-gradient);
     -webkit-background-clip: text;

@@ -501,6 +501,17 @@ onMounted(() => {
     },
   )
 
+  // While the planner reworks the loop, the line on the map — the stale
+  // answer, and the one planner surface that is always in view — ghosts and
+  // breathes. Not during navigation: there the line is being walked, and the
+  // only recalculation is the rejoin's, which has its own dashed voice.
+  watch(
+    () => (store.pending || store.busy) && !nav.active,
+    (working) => {
+      if (layers.ready()) layers.setWorking(working)
+    },
+  )
+
   watch(
     () => store.flyTo,
     (target) => {
