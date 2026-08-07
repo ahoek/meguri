@@ -258,54 +258,44 @@ const routeStats = computed(() => {
            three different surfaces showing up at different moments: a result
            card deep in the sheet, a strip row when collapsed, and plotting
            variants of each. -->
-      <Transition name="answer-swap" mode="out-in">
-        <div v-if="store.start && working" key="plotting" class="answer answer-plotting" role="status">
-          <!-- The brand mark plotting its own loop: the walker dot goes
-               round while the gradient arc draws long and short behind it,
-               the way the route is being worked out behind the walk. Borrows
-               the header svg's gradient; under reduced motion the attributes
-               win and it is simply the logo standing still. -->
-          <svg class="loop-spin" viewBox="0 0 48 48" aria-hidden="true">
-            <circle
-              class="arc"
-              cx="24" cy="24" r="15"
-              fill="none" stroke="url(#brand-g)" stroke-width="7"
-              stroke-linecap="round" stroke-dasharray="70 25"
-              transform="rotate(120 24 24)"
-            />
-            <circle class="dot" cx="24" cy="39" r="5" fill="var(--ink)" />
+      <!-- Face swaps are enter-only: the newcomer springs in over an instant
+           cut, because a leave phase means a beat with no .answer at all —
+           and the strip's height hangs off `:has(.answer)`, so that beat
+           collapsed the whole rim and everything anchored to it. No spinner
+           either: the sweep on the rim is the working signal, and a second
+           loop mark sitting right above the brand's own was the logo
+           apparently seeing double. -->
+      <div v-if="store.start && working" class="answer answer-plotting" role="status">
+        {{ t('plotting') }}
+      </div>
+      <div v-else-if="routeStats" class="answer">
+        <button class="answer-stats" :aria-label="t('panelToggle')" @click="collapsed = !collapsed">
+          <span>{{ routeStats.distance }}</span>
+          <span>{{ routeStats.duration }}</span>
+        </button>
+        <button
+          class="reroll"
+          :aria-label="t('anotherRoute')"
+          :title="t('anotherRoute')"
+          @click="generate({ shuffle: true })"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          {{ t('plotting') }}
-        </div>
-        <div v-else-if="routeStats" key="route" class="answer">
-          <button class="answer-stats" :aria-label="t('panelToggle')" @click="collapsed = !collapsed">
-            <span>{{ routeStats.distance }}</span>
-            <span>{{ routeStats.duration }}</span>
-          </button>
-          <button
-            class="reroll"
-            :aria-label="t('anotherRoute')"
-            :title="t('anotherRoute')"
-            @click="generate({ shuffle: true })"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h3.5c5 0 5.5 8 10.5 8H21M4 18h3.5c1.9 0 3.1-1.1 4.1-2.4M21 6h-3c-1.9 0-3.1 1.1-4.1 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              <path d="m18.5 3.5 3 2.5-3 2.5M18.5 11.5l3 2.5-3 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <button class="nav-cta" @click="onStartNavigation()">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
-            </svg>
-            {{ t('navStart') }}
-          </button>
-        </div>
-        <div v-else-if="showRetry" key="retry" class="answer">
-          <!-- The one dead end automation creates: routing failed, no setting
-               has moved, nothing will retry on its own. -->
-          <button class="retry-cta" @click="generate()">{{ t('retryRoute') }}</button>
-        </div>
-      </Transition>
+        </button>
+        <button class="nav-cta" @click="onStartNavigation()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3.5 11.5 21 4l-7.5 17.5-2-7.5z" fill="currentColor" />
+          </svg>
+          {{ t('navStart') }}
+        </button>
+      </div>
+      <div v-else-if="showRetry" class="answer">
+        <!-- The one dead end automation creates: routing failed, no setting
+             has moved, nothing will retry on its own. -->
+        <button class="retry-cta" @click="generate()">{{ t('retryRoute') }}</button>
+      </div>
     </div>
 
     <div class="sheet-body">
@@ -659,6 +649,8 @@ const routeStats = computed(() => {
 
   .answer {
     padding: 14px 22px;
+    /* Same arithmetic as the phone's: 46px line + this padding, border-box. */
+    min-height: 74px;
   }
 }
 
@@ -791,6 +783,10 @@ const routeStats = computed(() => {
 
   .answer {
     padding: 0 14px 10px;
+    /* border-box: the shared 46px line plus this padding, or the text-only
+       face comes out ten pixels shorter than the one with buttons and the
+       rim hops with every recalculation. */
+    min-height: 56px;
   }
 
   /* Clips the sweep to the glass's own rounded corners, so the bar travels
@@ -1173,16 +1169,31 @@ const routeStats = computed(() => {
 
 /* ---- the answer bar ---- */
 /* One row, three faces (plotting, route, retry), one home. Every face keeps
-   to the same 46px line so a state swap never moves the rim it sits on. */
+   to the same 46px line so a state swap never moves the rim it sits on, and
+   each face springs in over an instant cut — v-if branches are distinct
+   elements, so insertion replays this without a leave phase ever emptying
+   the bar. */
 .answer {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 46px;
+  /* No min-height here: each layout sets its own (46px line + its padding,
+     border-box) in its media block, and this rule comes later in the file —
+     a value here would silently win on source order. */
+  animation: answer-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
+@keyframes answer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Words only: the sweep on the rim above is the motion that says "working" —
+   a spinner here sat directly over the brand's own loop mark, and the logo
+   appeared to be seeing double. */
 .answer-plotting {
-  gap: 12px;
   font-size: 14.5px;
   font-weight: 600;
   color: var(--ink-2);
@@ -1317,90 +1328,14 @@ const routeStats = computed(() => {
   }
 }
 
-/* Faces crossing over: quick, and on the panel's own spring. */
-.answer-swap-enter-active {
-  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-}
-
-.answer-swap-leave-active {
-  transition: opacity 0.12s ease;
-}
-
-.answer-swap-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-.answer-swap-leave-to {
-  opacity: 0;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .sheet-top:has(.answer-plotting)::before {
     width: 100%;
     animation: none;
   }
 
-  /* Still, the mark is simply the logo standing beside the words: with the
-     animations off, the svg's own attributes carry the brand arc. */
-  .loop-spin,
-  .loop-spin .arc,
-  .loop-spin .dot {
+  .answer {
     animation: none;
-  }
-
-  .answer-swap-enter-active,
-  .answer-swap-leave-active {
-    transition: none;
-  }
-}
-
-/* The working glyph: the brand mark plotting its own loop. The svg turns at
-   a walker's pace while the arc inside draws itself long and shrinks back —
-   the route being worked out behind the walk — and the dot takes its little
-   steps. The dash keyframes end one full circumference (r=15 → 94.25) from
-   where they began, so the cycle has no seam. */
-.loop-spin {
-  flex: none;
-  width: 21px;
-  height: 21px;
-  animation: spin 1.4s linear infinite;
-}
-
-.loop-spin .arc {
-  animation: trace 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.loop-spin .dot {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: dot-step 0.7s ease-in-out infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-@keyframes trace {
-  0% {
-    stroke-dasharray: 5 89.25;
-    stroke-dashoffset: 0;
-  }
-  55% {
-    stroke-dasharray: 68 26.25;
-    stroke-dashoffset: -24;
-  }
-  100% {
-    stroke-dasharray: 5 89.25;
-    stroke-dashoffset: -94.25;
-  }
-}
-
-@keyframes dot-step {
-  50% {
-    transform: scale(0.8);
   }
 }
 
