@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   store,
   RANGES,
@@ -172,6 +172,65 @@ async function onCheckUpdates() {
 const working = computed(() => store.pending || store.busy)
 
 /**
+ * The logo's work dance starts and ends in its resting pose. Starting is
+ * seamless by construction — the keyframes' 0% *is* the logo at rest — and
+ * stopping waits for the lap to complete: the class comes off on the
+ * animation's own iteration boundary, where every keyframe (rotation 360≡0,
+ * the arc's dash cycle, the dot's step) has just passed through rest again.
+ * Snapping the animation off mid-lap froze the mark at whatever angle the
+ * request happened to finish on, then jumped it home.
+ */
+const logoSpinning = ref(false)
+watch(working, (w) => {
+  if (w) logoSpinning.value = true
+})
+
+function onLogoLap() {
+  if (!working.value) logoSpinning.value = false
+}
+
+/**
+ * The rim light while the planner works. An SVG path along the sheet's real
+ * top edge — up the left rounded corner, across, down the right — so the
+ * travelling segment takes the corners instead of stopping short of them.
+ * pathLength normalises the geometry to 100 whatever the width, which keeps
+ * the dash arithmetic in CSS; the path itself is remeasured with the strip.
+ */
+const rim = reactive({ w: 0, r: 0 })
+
+function measureRim() {
+  const el = sheetTopEl.value
+  if (!el) return
+  rim.w = el.clientWidth
+  // The rounding belongs to the panel's glass, not to the strip inside it —
+  // and only on a phone, where the strip rides the panel's top. On a desktop
+  // the bar sits at the panel's foot and its top edge is a straight border.
+  rim.r =
+    isMobile() && panelEl.value
+      ? parseFloat(getComputedStyle(panelEl.value).borderTopLeftRadius) || 0
+      : 0
+}
+
+const rimPath = computed(() => {
+  const inset = 1.5 // half the stroke, so the light straddles the edge
+  const w = rim.w
+  const r = Math.max(rim.r - inset, 0)
+  if (!w) return ''
+  return (
+    `M ${inset} ${r + inset} A ${r} ${r} 0 0 1 ${r + inset} ${inset} ` +
+    `L ${w - r - inset} ${inset} A ${r} ${r} 0 0 1 ${w - inset} ${r + inset}`
+  )
+})
+
+let rimObserver: ResizeObserver | null = null
+onMounted(() => {
+  measureRim()
+  rimObserver = new ResizeObserver(measureRim)
+  if (sheetTopEl.value) rimObserver.observe(sheetTopEl.value)
+})
+onBeforeUnmount(() => rimObserver?.disconnect())
+
+/**
  * The panel's own button, and the only state that still needs one.
  *
  * "Create my route" was a promise it could not keep: it only ever showed when
@@ -258,12 +317,24 @@ const routeStats = computed(() => {
            three different surfaces showing up at different moments: a result
            card deep in the sheet, a strip row when collapsed, and plotting
            variants of each. -->
+      <!-- The rim light: a path along the sheet's actual top edge, corners
+           included, that the working segment travels end to end. -->
+      <svg
+        v-if="store.start && working && rimPath"
+        class="rim-sweep"
+        :width="rim.w"
+        :height="rim.r + 4"
+        :viewBox="`0 0 ${rim.w} ${rim.r + 4}`"
+        aria-hidden="true"
+      >
+        <path :d="rimPath" pathLength="100" fill="none" stroke="url(#brand-g)" stroke-width="3" stroke-linecap="round" />
+      </svg>
       <!-- Face swaps are enter-only: the newcomer springs in over an instant
            cut, because a leave phase means a beat with no .answer at all —
            and the strip's height hangs off `:has(.answer)`, so that beat
            collapsed the whole rim and everything anchored to it. No spinner
-           either: the sweep on the rim is the working signal, and a second
-           loop mark sitting right above the brand's own was the logo
+           either: the rim light and the logo are the working signal, and a
+           second loop mark sitting right above the brand's own was the logo
            apparently seeing double. -->
       <div v-if="store.start && working" class="answer answer-plotting" role="status">
         {{ t('plotting') }}
@@ -304,7 +375,13 @@ const routeStats = computed(() => {
            and short as the mark turns and the dot takes its steps — the loop
            being plotted, performed by the brand that is a loop. Scrolled out
            of sight it hands over to the sweep on the rim, which never is. -->
-      <svg class="brand-mark" :class="{ working }" viewBox="0 0 48 48" aria-hidden="true">
+      <svg
+        class="brand-mark"
+        :class="{ working: logoSpinning }"
+        viewBox="0 0 48 48"
+        aria-hidden="true"
+        @animationiteration="onLogoLap"
+      >
         <circle
           class="brand-arc"
           cx="24" cy="24" r="15"
@@ -819,9 +896,13 @@ const routeStats = computed(() => {
 }
 
 /* The logo plotting its own loop while the planner plots the real one: the
-   mark turns at a walker's pace, the arc draws itself long and shrinks back,
-   the dot takes its little steps. The dash cycle ends exactly one
-   circumference (r=15 → 94.25) from where it began, so it has no seam. */
+   mark turns at a walker's pace, the arc unravels behind the walk and draws
+   itself whole again, the dot takes its little steps. Every keyframe starts
+   AND ends in the resting pose — the arc at its brand 70/25 (well, 24.25:
+   the dash period must equal the r=15 circumference of 94.25 or each lap
+   ends three quarters of a pixel out of step), the rotation at 0≡360 — so a
+   lap boundary is indistinguishable from the logo standing still. That is
+   what lets the script hand the mark back at rest instead of snapping it. */
 .brand-mark.working {
   animation: spin 1.4s linear infinite;
 }
@@ -844,15 +925,15 @@ const routeStats = computed(() => {
 
 @keyframes trace {
   0% {
-    stroke-dasharray: 5 89.25;
+    stroke-dasharray: 70 24.25;
     stroke-dashoffset: 0;
   }
-  55% {
-    stroke-dasharray: 68 26.25;
-    stroke-dashoffset: -24;
+  50% {
+    stroke-dasharray: 12 82.25;
+    stroke-dashoffset: -46;
   }
   100% {
-    stroke-dasharray: 5 89.25;
+    stroke-dasharray: 70 24.25;
     stroke-dashoffset: -94.25;
   }
 }
@@ -1359,40 +1440,38 @@ const routeStats = computed(() => {
   filter: brightness(1.06);
 }
 
-/* The sweep runs along the rim the bar lives on — the sheet's top edge on a
-   phone, the bar's own top border on a desktop — bright enough to be seen
-   over a busy map: three pixels and a glow, not a hairline. The strip stands
-   in from the corners at the sheet's own margin and the light moves *inside*
-   it (a travelling background, its glow a drop-shadow tracing the visible
-   segment), so nothing has to be clipped — the overflow: hidden this used to
-   need was cutting off Start's glow beside it. */
-.sheet-top:has(.answer-plotting)::before {
-  content: '';
+/* The rim light: it runs the edge the bar lives on — corners included, the
+   path *is* the glass's top edge — bright enough to be seen over a busy map:
+   three pixels and a glow, not a hairline. pathLength=100 in the markup
+   makes the dash sums below hold at any width; the gap outlasts path plus
+   segment, so the light's tail has fully left before its head returns. */
+.rim-sweep {
   position: absolute;
   top: 0;
-  left: 22px;
-  right: 22px;
-  height: 3px;
-  border-radius: 99px;
-  background: linear-gradient(90deg, transparent, var(--accent-1) 30%, var(--accent-2) 70%, transparent) no-repeat;
-  background-size: 46% 100%;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
   filter: drop-shadow(0 0 6px var(--accent-1));
-  animation: sweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
-@keyframes sweep {
+.rim-sweep path {
+  stroke-dasharray: 28 172;
+  animation: rim-travel 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes rim-travel {
   from {
-    background-position: -85% 0;
+    stroke-dashoffset: 28;
   }
   to {
-    background-position: 185% 0;
+    stroke-dashoffset: -100;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* The strip stands still and lit end to end. */
-  .sheet-top:has(.answer-plotting)::before {
-    background-size: 100% 100%;
+  /* The rim stands still and lit end to end. */
+  .rim-sweep path {
+    stroke-dasharray: none;
     animation: none;
   }
 
