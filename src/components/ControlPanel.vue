@@ -300,14 +300,19 @@ const routeStats = computed(() => {
 
     <div class="sheet-body">
     <header class="brand">
-      <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+      <!-- While the planner works, the logo works: the arc draws itself long
+           and short as the mark turns and the dot takes its steps — the loop
+           being plotted, performed by the brand that is a loop. Scrolled out
+           of sight it hands over to the sweep on the rim, which never is. -->
+      <svg class="brand-mark" :class="{ working }" viewBox="0 0 48 48" aria-hidden="true">
         <circle
+          class="brand-arc"
           cx="24" cy="24" r="15"
           fill="none" stroke="url(#brand-g)" stroke-width="7"
           stroke-linecap="round" stroke-dasharray="70 25"
           transform="rotate(120 24 24)"
         />
-        <circle cx="24" cy="39" r="5" fill="var(--ink)" />
+        <circle class="brand-dot" cx="24" cy="39" r="5" fill="var(--ink)" />
         <defs>
           <linearGradient id="brand-g" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stop-color="var(--accent-1)" />
@@ -654,13 +659,14 @@ const routeStats = computed(() => {
   }
 }
 
-/* The answer bar's home in both layouts; the sweep clips to its edge. The
-   display is each layout's own business — the two media blocks partition
-   every width between them, and a `display: none` here would outrank the
-   earlier desktop block on source order alone. */
+/* The answer bar's home in both layouts. The display is each layout's own
+   business — the two media blocks partition every width between them, and a
+   `display: none` here would outrank the earlier desktop block on source
+   order alone. No overflow clipping: it was there to trim the sweep at the
+   glass's rounded corners, and it trimmed Start's glow with it — the sweep
+   keeps itself inside the corners instead. */
 .sheet-top {
   position: relative;
-  overflow: hidden;
 }
 
 .panel {
@@ -782,17 +788,14 @@ const routeStats = computed(() => {
   }
 
   .answer {
-    padding: 0 14px 10px;
+    /* 22px like every line of the sheet: the figures share the left margin
+       with the brand and the labels below, or the bar reads as a lodger
+       rather than the first row of the panel. */
+    padding: 0 22px 10px;
     /* border-box: the shared 46px line plus this padding, or the text-only
        face comes out ten pixels shorter than the one with buttons and the
        rim hops with every recalculation. */
     min-height: 56px;
-  }
-
-  /* Clips the sweep to the glass's own rounded corners, so the bar travels
-     the rim rather than hovering somewhere on the surface. */
-  .sheet-top {
-    border-radius: var(--radius) var(--radius) 0 0;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -813,6 +816,59 @@ const routeStats = computed(() => {
   width: 42px;
   height: 42px;
   flex: none;
+}
+
+/* The logo plotting its own loop while the planner plots the real one: the
+   mark turns at a walker's pace, the arc draws itself long and shrinks back,
+   the dot takes its little steps. The dash cycle ends exactly one
+   circumference (r=15 → 94.25) from where it began, so it has no seam. */
+.brand-mark.working {
+  animation: spin 1.4s linear infinite;
+}
+
+.brand-mark.working .brand-arc {
+  animation: trace 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.brand-mark.working .brand-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dot-step 0.7s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes trace {
+  0% {
+    stroke-dasharray: 5 89.25;
+    stroke-dashoffset: 0;
+  }
+  55% {
+    stroke-dasharray: 68 26.25;
+    stroke-dashoffset: -24;
+  }
+  100% {
+    stroke-dasharray: 5 89.25;
+    stroke-dashoffset: -94.25;
+  }
+}
+
+@keyframes dot-step {
+  50% {
+    transform: scale(0.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-mark.working,
+  .brand-mark.working .brand-arc,
+  .brand-mark.working .brand-dot {
+    animation: none;
+  }
 }
 
 .brand-text {
@@ -1305,32 +1361,38 @@ const routeStats = computed(() => {
 
 /* The sweep runs along the rim the bar lives on — the sheet's top edge on a
    phone, the bar's own top border on a desktop — bright enough to be seen
-   over a busy map: three pixels and a glow, not a hairline. */
+   over a busy map: three pixels and a glow, not a hairline. The strip stands
+   in from the corners at the sheet's own margin and the light moves *inside*
+   it (a travelling background, its glow a drop-shadow tracing the visible
+   segment), so nothing has to be clipped — the overflow: hidden this used to
+   need was cutting off Start's glow beside it. */
 .sheet-top:has(.answer-plotting)::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 0;
-  width: 44%;
+  left: 22px;
+  right: 22px;
   height: 3px;
   border-radius: 99px;
-  background: var(--accent-gradient);
-  box-shadow: 0 0 12px 1.5px var(--accent-1);
+  background: linear-gradient(90deg, transparent, var(--accent-1) 30%, var(--accent-2) 70%, transparent) no-repeat;
+  background-size: 46% 100%;
+  filter: drop-shadow(0 0 6px var(--accent-1));
   animation: sweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
 @keyframes sweep {
   from {
-    transform: translateX(-100%);
+    background-position: -85% 0;
   }
   to {
-    transform: translateX(300%);
+    background-position: 185% 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* The strip stands still and lit end to end. */
   .sheet-top:has(.answer-plotting)::before {
-    width: 100%;
+    background-size: 100% 100%;
     animation: none;
   }
 
