@@ -375,10 +375,6 @@ const routeStats = computed(() => {
 
       <div v-if="store.start" class="wp-block" :class="{ armed: store.waypointMode }">
         <div class="setting-row">
-          <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 21s-6.5-5.5-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.5 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-            <circle cx="12" cy="10.7" r="2.2" fill="currentColor"/>
-          </svg>
           <span class="setting-text">
             <strong>{{ t('wpLabel') }}</strong>
             <small>{{ wpHint }}</small>
@@ -454,10 +450,6 @@ const routeStats = computed(() => {
     </div>
 
     <label class="setting-row nature-row">
-      <svg class="setting-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3c-4 3.2-6.5 5-6.5 9a6.5 6.5 0 0 0 13 0c0-4-2.5-5.8-6.5-9z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M12 21v-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
       <span class="setting-text">
         <strong>{{ t('natureLabel') }}</strong>
         <small>{{ store.nature ? t('natureOn') : t('natureOff') }}</small>
@@ -597,12 +589,11 @@ const routeStats = computed(() => {
   padding: 22px;
 }
 
-/* Grouping by rhythm rather than by boxes. Every gap used to be the same
-   eighteen pixels, so the eye had no way to tell that the search, the start
-   and the stops answer one question while the distance answers another — the
-   labels were carrying that on their own. Now a new question opens a wider
-   gap, a settings row hugs the group it belongs to, and the action stands
-   apart from the settings that feed it. */
+/* Grouping by rhythm rather than by boxes or rules. Every gap used to be the
+   same eighteen pixels, so the eye had no way to tell that the search, the
+   start and the stops answer one question while the distance answers another
+   — the labels were carrying that on their own. A new question now opens a
+   wider gap; everything else keeps the sheet's normal step. */
 .sheet-body > * + * {
   margin-top: 20px;
 }
@@ -611,9 +602,6 @@ const routeStats = computed(() => {
   margin-top: 26px;
 }
 
-.sheet-body > .setting-row {
-  margin-top: 6px;
-}
 
 /* A flex column shrinks its children before it agrees to scroll, so a row
    whose description ran to two lines was squeezed under its own text — the
@@ -1232,27 +1220,20 @@ const routeStats = computed(() => {
 
 /* ---- waypoints ---- */
 /* One grammar for anything that reads "here is a setting, here is its
-   control": icon, text, control, one height, a hairline to sit on. These were
-   two filled cards with icon-title-description inside them — visually
-   siblings, though one is an input and the other a preference, and they sat on
-   opposite sides of the button. Boxes were doing the grouping that spacing and
-   a rule can do more quietly. */
+   control": text left, control right, on the same left edge as every other
+   line in the panel. These were two filled cards, then two rows with a rule
+   above them — a rule belongs between sections, not between a row and the
+   group it is part of. What holds them now is the alignment: the title starts
+   where the label, the search box, the distance and the slider start, and the
+   control ends where they end. */
 .setting-row {
   display: flex;
   align-items: center;
   gap: 12px;
   min-height: 52px;
   padding: 9px 0;
-  border-top: 1px solid var(--hairline);
 }
 
-.setting-icon {
-  flex: none;
-  width: 21px;
-  height: 21px;
-  color: var(--ink-3);
-  transition: color 0.2s;
-}
 
 .setting-text {
   display: flex;
@@ -1280,9 +1261,6 @@ const routeStats = computed(() => {
 }
 
 
-.wp-block.armed .setting-icon {
-  color: var(--accent-1);
-}
 
 
 .wp-toggle {
@@ -1446,9 +1424,6 @@ const routeStats = computed(() => {
 }
 
 
-.nature-row:has(.switch:checked) .setting-icon {
-  color: var(--accent-1);
-}
 
 
 .switch {
