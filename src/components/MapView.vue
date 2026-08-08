@@ -23,8 +23,8 @@ import {
 } from '../app/nav-session'
 import { traveledLine, locateOnRoute } from '../domain/navigation'
 import { createStyleTweaks } from '../map/style'
-import { collectGreen, nudgeToGreen } from '../map/green'
-import { metresThroughBuildings } from '../map/buildings'
+import { createGreenNudger } from '../map/green'
+import { createBuildingMeter } from '../map/buildings'
 import { createRouteLayers, ll } from '../map/route-layers'
 import { createMarkers } from '../map/markers'
 import { createPuck } from '../map/puck'
@@ -348,14 +348,12 @@ onMounted(() => {
   })
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
 
-  // Only the map has the landcover polygons, so it lends the planner a way to
-  // pull via points onto nearby green. Patches are gathered per call and reused
-  // across the loop's attempts — querySourceFeatures walks every loaded tile.
-  setBuildingMeter((coords) => metresThroughBuildings(map, coords))
-  setGreenNudger((point, maxMoveM) => {
-    const patches = collectGreen(map, point, maxMoveM / 1000)
-    return nudgeToGreen(point, patches, maxMoveM)
-  })
+  // Only the map has the landcover and building polygons, so it lends the
+  // planner a way to pull via points onto nearby green and to notice a route
+  // threading a wall. Both index what the loaded tiles hold and keep it until
+  // the tiles change, so one plan's seven candidates share the one scan.
+  setBuildingMeter(createBuildingMeter(map))
+  setGreenNudger(createGreenNudger(map))
 
   styleTweaks = createStyleTweaks(map)
   layers = createRouteLayers(map)

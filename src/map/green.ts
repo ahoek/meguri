@@ -74,13 +74,22 @@ function ringMetrics(ring: Ring, perDegLng: number) {
 }
 
 /**
- * Collect green worth walking to, once per generate rather than once per point.
- * `querySourceFeatures` walks every loaded tile, and the loop asks about a
- * handful of points across up to seven attempts.
+ * Every patch of green the loaded tiles know about.
+ *
+ * Not filtered by reach, and that is the point: `nudgeToGreen` already drops
+ * anything further than the via point may travel, so one collection serves
+ * every point of every attempt. Filtering here instead meant collecting per
+ * point — `querySourceFeatures` walking every loaded tile, and the ring
+ * metrics over all of it, four to seven times per attempt across up to seven
+ * attempts. The doc comment claimed once per generate; the wiring never was.
+ *
+ * The metric scale comes from the map's centre rather than from each point.
+ * Centroids are unaffected — the longitude scale cancels out of the shoelace
+ * quotient — and area only feeds a cube-rooted tie-break, so a cosine that is
+ * a few kilometres out of place cannot change which patch wins.
  */
-export function collectGreen(map: maplibregl.Map, near: LngLat, withinKm: number) {
-  const perDegLng = M_PER_DEG_LAT * Math.cos((near[1] * Math.PI) / 180)
-  const reachM = withinKm * 1000
+export function collectGreen(map: maplibregl.Map) {
+  const perDegLng = M_PER_DEG_LAT * Math.cos((map.getCenter().lat * Math.PI) / 180)
   const patches: { lng: number; lat: number; area: number }[] = []
 
   for (const { layer, sourceLayer, cls } of GREEN_LAYERS) {
@@ -96,11 +105,6 @@ export function collectGreen(map: maplibregl.Map, near: LngLat, withinKm: number
       for (const ring of ringsOf(feature.geometry as { type: string; coordinates: unknown })) {
         const m = ringMetrics(ring, perDegLng)
         if (!m || m.area < MIN_AREA_M2) continue
-        const away = Math.hypot(
-          (m.lng - near[0]) * perDegLng,
-          (m.lat - near[1]) * M_PER_DEG_LAT,
-        )
-        if (away > reachM) continue
         patches.push(m)
       }
     }
@@ -139,4 +143,26 @@ export function nudgeToGreen(
     }
   }
   return best ? [best.lng, best.lat] : null
+}
+
+/**
+ * A nudger over the green the map currently holds, collected once and kept
+ * until tiles change — the same arrangement, and for the same reason, as the
+ * building meter beside it.
+ */
+export function createGreenNudger(map: maplibregl.Map) {
+  let patches: GreenPatches = []
+  let stale = true
+
+  map.on('sourcedata', (e) => {
+    if (e.sourceId === 'openmaptiles') stale = true
+  })
+
+  return (point: LngLat, maxMoveM: number) => {
+    if (stale) {
+      patches = collectGreen(map)
+      stale = false
+    }
+    return nudgeToGreen(point, patches, maxMoveM)
+  }
 }
