@@ -1,35 +1,13 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted, ref, watchEffect } from 'vue'
+import { onMounted, ref, watchEffect } from 'vue'
+import MapView from './components/MapView.vue'
 import ControlPanel from './components/ControlPanel.vue'
+import NavPanel from './components/NavPanel.vue'
 import { store, resumeSession } from './app/store'
 import { nav } from './app/nav-session'
 import { locale, t } from './i18n'
 
-/**
- * The map arrives a moment after the planner, on purpose.
- *
- * MapLibre is a megabyte of JavaScript and seventy kilobytes of CSS, and while
- * it was imported statically every byte of it stood between a cold visit and
- * the first thing on screen — parsed and compiled before Vue could mount, on
- * phone silicon, over whatever connection the walker has outdoors. None of it
- * is needed to draw the planner, which is the whole of what you see first and
- * the only part you can act on: pick a distance, name a place, press a button.
- *
- * The map is not delayed by much and loses nothing by it — its canvas opens
- * empty either way and stays empty until tiles arrive over the same
- * connection. What it stops doing is holding the planner hostage while it
- * loads.
- */
-const MapView = defineAsyncComponent(() => import('./components/MapView.vue'))
-
-// The async wrapper resolves the ref to the inner component, so Recenter still
-// reaches the real thing — but only once the chunk is in, hence the optional
-// call at the template.
-const mapView = ref<{ recenter: () => void } | null>(null)
-
-// Navigation is a mode you enter, not a screen you land on: its panel, and the
-// speech and compass plumbing behind it, follow the same reasoning as the map.
-const NavPanel = defineAsyncComponent(() => import('./components/NavPanel.vue'))
+const mapView = ref<InstanceType<typeof MapView> | null>(null)
 
 watchEffect(() => {
   document.documentElement.dataset.mode = store.mode

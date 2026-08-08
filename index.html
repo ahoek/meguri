@@ -8,17 +8,10 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
-    <!-- The one subset every supported language needs. Declared in the app's
-         own stylesheet, which the browser would not have parsed yet; this
-         starts the fetch alongside it instead of a round trip behind it. The
-         latin-ext subset is deliberately not preloaded — it is for the odd
-         foreign place name, and most visits never touch it. -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="preload"
-      href="%BASE_URL%fonts/outfit-latin.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300..800&display=swap"
+      rel="stylesheet"
     />
     <title>Meguri — round-trip route maker</title>
   </head>

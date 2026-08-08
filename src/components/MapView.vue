@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
-// Imported here rather than in main.ts so it travels with this component's
-// chunk. In main.ts it was a render-blocking stylesheet in the document head —
-// 70 kB of it, for chrome that cannot appear until the map itself has loaded.
-import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   store,
   setStart,
