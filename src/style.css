@@ -1,3 +1,46 @@
+/* Outfit, served from our own origin.
+ *
+ * It used to come from fonts.googleapis.com, and that stylesheet was the one
+ * render-blocking third-party request on the page: nothing could paint until a
+ * fresh DNS lookup, TCP handshake and TLS negotiation to a second host had
+ * returned a file whose entire content is the two rules below. The font files
+ * then came from a third host after that.
+ *
+ * Declared here instead, in a stylesheet the browser is already fetching, so
+ * the round trip disappears and the woff2 is discovered a beat earlier. It also
+ * makes the installed app honest: the service worker precaches these, so an
+ * offline first run gets the typeface rather than falling back to system-ui.
+ *
+ * Two subsets with Google's own unicode-ranges, so a Dutch or English planner
+ * downloads 32 kB and only a foreign place name with a Polish or Turkish letter
+ * in it pulls the other 15 kB. Japanese is not in Outfit at all and falls back
+ * to the system font, as it always did.
+ *
+ * `swap`: text paints immediately in system-ui and reflows to Outfit when it
+ * lands. The wordmark shifting once beats a blank panel.
+ */
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/outfit-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/outfit-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
   --font: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
