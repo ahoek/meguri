@@ -271,11 +271,21 @@ function remapMask(
  * along a path and back down the same one, which is the shape the start of a
  * loop most often takes.
  *
- * Fifty metres is about the shortest doubled stretch worth the trouble; below
- * that it is a junction touching itself, and a metre and a half of offset buys
- * nothing.
+ * Below some length a doubled stretch is only a junction touching itself, and
+ * a metre of offset buys nothing. Fifty metres was the first guess at where
+ * that line falls and it sat too high: measured over ninety loops out of one
+ * street, the doubled runs come in two clumps with nothing between them —
+ * junction noise up to about twenty metres, and real there-and-back sticks
+ * from forty up. Fifty cut through the second clump, so a stick a walk's
+ * length short of it was drawn as one line with both directions' chevrons on
+ * it, which is the exact confusion lanes exist to prevent. Thirty sits in the
+ * empty gap, clear of both clumps.
+ *
+ * A short stick is not a small problem, either: it is the shape a loop starts
+ * and finishes on, so it is the first and last thing anyone walking this
+ * looks at.
  */
-const DOUBLED_BACK_M = 50
+const DOUBLED_BACK_M = 30
 
 export function doublesBack(coords: LngLat[]) {
   const seen = new Set<string>()

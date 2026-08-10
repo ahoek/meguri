@@ -458,6 +458,33 @@ describe('spotting a there-and-back leg', () => {
     expect(doublesBack([...out, ...block, ...out.slice().reverse()])).toBe(true)
   })
 
+  /**
+   * The stick a loop hangs off is often barely longer than the street it
+   * leaves by. This one is a single 35 m segment walked out and back — under
+   * the fifty-metre floor this used to carry, so the whole loop was drawn as
+   * one line with both directions' chevrons interleaved along it, which is
+   * the confusion lanes are for. It is also the first and last thing anyone
+   * walking the loop sees.
+   */
+  const lollipop = (stickM: number) => {
+    const tip = offset(ORIGIN, 0, stickM)
+    const block = squareLoop(120, 20).geometry.coordinates.map((c) => [
+      c[0] + (tip[0] - ORIGIN[0]),
+      c[1] + (tip[1] - ORIGIN[1]),
+    ]) as LngLat[]
+    return [ORIGIN, ...block, ORIGIN] as LngLat[]
+  }
+
+  it('sees a stick shorter than a block of the loop it hangs off', () => {
+    expect(doublesBack(lollipop(35))).toBe(true)
+  })
+
+  // And still holds a floor under it: twenty metres of shared tarmac is a
+  // junction touching itself, where a metre of offset buys nothing.
+  it('leaves a stick too short to read as a leg of its own', () => {
+    expect(doublesBack(lollipop(20))).toBe(false)
+  })
+
   // Four junctions clipped in passing add up to a hundred metres and are not a
   // there-and-back leg. The longest single run is what decides it.
   it('is not fooled by a loop that clips its own path here and there', () => {
