@@ -99,12 +99,9 @@ input {
 }
 
 /* ---- MapLibre chrome tweaks ---- */
-.maplibregl-ctrl-group {
-  border-radius: 12px !important;
-  box-shadow: var(--shadow) !important;
-  overflow: hidden;
-}
-
+/* The `.maplibregl-ctrl-group` rounding that stood here dressed the zoom
+   buttons, which are gone — the wheel and two fingers already zoom. The
+   compact attribution is the only control left and wears its own clothes. */
 .maplibregl-canvas {
   cursor: crosshair;
 }

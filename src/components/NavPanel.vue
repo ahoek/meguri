@@ -1223,11 +1223,22 @@ function onMetricsScroll() {
   pointer-events: auto;
 }
 
+/* Anchored at the bottom and growing upward, an unbounded list walks off the
+   top of the screen — and the entries it loses up there are the ones you
+   cannot scroll back to, because an absolutely positioned box has no scroll
+   of its own. It takes very few voices to get there: the list matches on
+   language prefix, so `en` collects every en-US, en-GB, en-AU and en-IN the
+   system installs, which on a desktop browser is dozens. So it is capped at
+   something that fits over the map and scrolls inside the cap. */
 .voice-menu {
   position: absolute;
   right: 62px;
   bottom: 0; /* grow upward, over the map rather than into the dash */
   min-width: 170px;
+  max-height: min(52dvh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1240,7 +1251,10 @@ function onMetricsScroll() {
   box-shadow: var(--shadow);
 }
 
+/* Both hold their height: in a scrolling flex column the default is to
+   shrink, which squeezed the entries instead of letting the list run on. */
 .voice-menu-title {
+  flex: none;
   margin: 2px 10px 4px;
   font-size: 11.5px;
   font-weight: 600;
@@ -1250,6 +1264,7 @@ function onMetricsScroll() {
 }
 
 .voice-menu button {
+  flex: none;
   text-align: left;
   padding: 9px 11px;
   border-radius: 10px;

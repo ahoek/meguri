@@ -346,7 +346,8 @@ onMounted(() => {
     zoom: store.start ? 14 : 12.5,
     attributionControl: { compact: true },
   })
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+  // No zoom buttons: a wheel on a desktop and two fingers on a phone already
+  // do it, and the pair sat in the one corner a walker's own hand covers.
 
   // Only the map has the landcover and building polygons, so it lends the
   // planner a way to pull via points onto nearby green and to notice a route
@@ -461,12 +462,17 @@ onMounted(() => {
     if (nav.active) return // tapping the map must not relocate the route
     if (store.waypointMode && store.start) {
       addWaypoint([e.lngLat.lng, e.lngLat.lat])
-    } else if (!store.route) {
+    } else if (!store.start) {
       setStart([e.lngLat.lng, e.lngLat.lat])
     } else {
-      // Standing work outranks a stray touch: with a route on screen a tap
-      // only proposes — a ghost pin lands, a pill asks, and the loop is not
-      // thrown away until you say so. See proposeStart for the reasoning.
+      // Standing work outranks a stray touch: once there is somewhere to walk
+      // from, a tap only proposes — a ghost pin lands, a pill asks, and what
+      // is set is not thrown away until you say so. See proposeStart.
+      //
+      // Asked of the start rather than the route, because between clearing a
+      // route and the replan landing there is a beat with a start and no
+      // route, and asking about the route made every tap in that beat a
+      // silent relocation. A start is standing work too.
       proposeStart([e.lngLat.lng, e.lngLat.lat])
     }
   })
@@ -615,7 +621,6 @@ onBeforeUnmount(() => {
     ref="container"
     class="map"
     :class="{ dropping: store.waypointMode }"
-    :style="{ '--banner-inset': store.bannerInset + 'px' }"
     :aria-label="store.waypointMode ? t('wpArmed') : t('mapAria')"
   ></div>
 </template>
@@ -631,10 +636,4 @@ onBeforeUnmount(() => {
   cursor: copy;
 }
 
-/* While navigating, the instruction banner covers the top of the screen.
-   Drop the zoom buttons below whatever height it has taken. */
-.map :deep(.maplibregl-ctrl-top-right) {
-  transition: transform 0.3s;
-  transform: translateY(var(--banner-inset, 0px));
-}
 </style>

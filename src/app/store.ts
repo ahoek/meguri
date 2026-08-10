@@ -524,9 +524,12 @@ export async function generate({ shuffle = false } = {}) {
     showError('errNoStart')
     return
   }
-  // Whatever stops you wanted are placed; leaving the map armed would turn
-  // the next tap on your new loop into a fourth one.
-  store.waypointMode = false
+  // Arming is the rider's switch, not ours: it stays on until they tap Done.
+  // Disarming here read as "one stop per arming", but a stop is what makes
+  // this run in the first place — so the second tap of "a few stops, one
+  // after another" always landed on a disarmed map, and with the route just
+  // cleared for the replan it fell through to the branch that moves the
+  // start. Placing a second stop moved where the walk began.
   if (shuffle) {
     store.bearing = Math.random() * 360
     store.clockwise = Math.random() < 0.5

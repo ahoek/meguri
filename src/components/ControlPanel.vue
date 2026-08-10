@@ -349,7 +349,23 @@ const routeStats = computed(() => {
         aria-hidden="true"
         @animationiteration="onRimPass"
       >
-        <path :d="rimPath" pathLength="100" fill="none" stroke="url(#brand-g)" stroke-width="3" stroke-linecap="round" />
+        <!-- Its own gradient rather than the logo's, and in user space.
+             `#brand-g` carries no gradientUnits, so it is in objectBoundingBox
+             units — fine for the logo's circle, fatal here: on a desktop the
+             bar's top edge is straight, so this path is a dead-level line
+             whose bounding box is zero high, and a box empty in one dimension
+             makes the spec drop the referencing element entirely. The sweep
+             was not dim on desktop, it was never painted, on exactly the
+             layout with no rounded rim to bend the path. User space spans the
+             rim whatever shape it takes, and colours the light along the way
+             it travels. -->
+        <defs>
+          <linearGradient id="rim-g" gradientUnits="userSpaceOnUse" x1="0" y1="0" :x2="rim.w" y2="0">
+            <stop offset="0" stop-color="var(--accent-1)" />
+            <stop offset="1" stop-color="var(--accent-2)" />
+          </linearGradient>
+        </defs>
+        <path :d="rimPath" pathLength="100" fill="none" stroke="url(#rim-g)" stroke-width="3" stroke-linecap="round" />
       </svg>
       <!-- Face swaps are enter-only: the newcomer springs in over an instant
            cut, because a leave phase means a beat with no .answer at all —
