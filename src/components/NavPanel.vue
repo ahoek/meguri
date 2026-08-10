@@ -671,8 +671,20 @@ function onMetricsScroll() {
   animation: nav-rise 0.5s 0.05s var(--ease-out-soft) both;
 }
 
+/* `backwards`, not `both`, and it matters beyond tidiness: this animation
+   declares only a `from`, so `both` leaves the transform property animated
+   once it has finished, computing to the identity matrix rather than to
+   `none`. An identity transform is still a transform, and a transform makes
+   its element the containing block for any `position: fixed` descendant — so
+   the voice picker's full-screen backdrop was being sized to this 50×110 box
+   of buttons instead of the viewport, and every click outside it fell through
+   to the map with the menu left open. `backwards` fills the delay, which is
+   all this ever needed, and holds nothing afterwards.
+
+   Anything fixed-position living in here depends on that, so keep the fill
+   mode off `both`/`forwards`. */
 .side-actions {
-  animation: nav-rise 0.5s 0.12s var(--ease-out-soft) both;
+  animation: nav-rise 0.5s 0.12s var(--ease-out-soft) backwards;
 }
 
 .demo-strip {
