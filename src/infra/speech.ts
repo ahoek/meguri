@@ -32,7 +32,19 @@ export function cancelSpeech() {
   // load, not per navigation session.
 }
 
-export function speak(text: string, lang: string, voiceURI?: string) {
+/**
+ * Say something. An instruction interrupts whatever is still being said —
+ * a stale turn is worse than none — but only when something is: iOS has
+ * been known to swallow the utterance that follows a cancel(), and calling
+ * cancel() into silence bought nothing for that risk. A junction cue asks
+ * to queue instead, so it follows the turn rather than cutting it short.
+ */
+export function speak(
+  text: string,
+  lang: string,
+  voiceURI?: string,
+  { interrupt = true } = {},
+) {
   const synth = window.speechSynthesis
   if (!synth) return
   const utterance = new SpeechSynthesisUtterance(text)
@@ -45,7 +57,7 @@ export function speak(text: string, lang: string, voiceURI?: string) {
   // iOS parks the queue when the screen locks or the tab backgrounds, and
   // never restarts it on its own.
   if (synth.paused) synth.resume()
-  synth.cancel() // a stale instruction is worse than none
+  if (interrupt && (synth.speaking || synth.pending)) synth.cancel()
   synth.speak(utterance)
   unlocked = true // speaking from a gesture opens the iOS door too
 }

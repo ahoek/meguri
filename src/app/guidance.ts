@@ -62,8 +62,8 @@ export function resetSpeech() {
   cancelSpeech()
 }
 
-function say(text: string) {
-  speak(text, voiceLang(), voiceChoice.value[locale.value])
+function say(text: string, { interrupt = true } = {}) {
+  speak(text, voiceLang(), voiceChoice.value[locale.value], { interrupt })
 }
 
 /** Remember a voice for the current language and let it introduce itself. */
@@ -176,9 +176,12 @@ export function speakJunction(junctions: NodeStop[], alongKm: number) {
   if ((here.atKm - alongKm) * 1000 > JUNCTION_ANNOUNCE_M) return
   saidJunction = index
   const next = junctions[index + 1]
+  // Queued, not interrupting: a turn being said at the junction matters
+  // more than the number, and the number can wait the two seconds.
   say(
     next
       ? t('knpSpoken').replace('{a}', here.ref).replace('{b}', next.ref)
       : t('knpSpokenLast').replace('{a}', here.ref),
+    { interrupt: false },
   )
 }
