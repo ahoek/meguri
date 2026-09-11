@@ -76,40 +76,47 @@ const today = computed(() =>
   display: none;
 }
 
+/* A5, the size of a map pocket: 148 mm wide, 132 mm of it inside the
+   margins, which is four cells of 33 mm. Measured: thirty-one cells and
+   the header come to about 175 of the 194 mm a side offers. */
+@page {
+  size: A5;
+  margin: 8mm;
+}
+
 @media print {
   .knp-print {
     display: block;
-    padding: 12mm;
     color: #000;
     background: #fff;
     font-family: var(--font);
   }
 
   h1 {
-    margin: 0 0 2mm;
-    font-size: 20pt;
+    margin: 0 0 1.5mm;
+    font-size: 16pt;
     font-weight: 800;
   }
 
   .meta {
-    margin: 0 0 3mm;
-    font-size: 11pt;
+    margin: 0 0 2mm;
+    font-size: 9pt;
     color: #333;
   }
 
   .sequence {
-    margin: 0 0 8mm;
-    font-size: 13pt;
+    margin: 0 0 4mm;
+    font-size: 10.5pt;
     font-weight: 700;
     color: #047857;
     word-spacing: 0.15em;
   }
 
-  /* Cut along the edge: a narrow column that fits a stem, several to a page
-     for long rides. */
+  /* Cut along the edges: a column of cells fits a stem, and a long ride
+     runs on to the next page rather than shrinking. */
   .strip {
     display: grid;
-    grid-template-columns: repeat(auto-fill, 34mm);
+    grid-template-columns: repeat(4, 33mm);
     gap: 0;
     margin: 0;
     padding: 0;
@@ -120,7 +127,7 @@ const today = computed(() =>
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 3mm 0 2mm;
+    padding: 1.5mm 0 1mm;
     border: 0.3mm dashed #999;
     margin: 0 -0.3mm -0.3mm 0;
     break-inside: avoid;
@@ -129,13 +136,13 @@ const today = computed(() =>
   .badge {
     display: grid;
     place-items: center;
-    min-width: 16mm;
-    height: 14mm;
-    padding: 0 3mm;
-    border: 1mm solid #047857;
-    border-radius: 3mm;
+    min-width: 14mm;
+    height: 10mm;
+    padding: 0 2.5mm;
+    border: 0.8mm solid #047857;
+    border-radius: 2.5mm;
     color: #047857;
-    font-size: 22pt;
+    font-size: 18pt;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
   }
@@ -143,25 +150,25 @@ const today = computed(() =>
   .word {
     display: grid;
     place-items: center;
-    height: 14mm;
+    height: 10mm;
     padding: 0 2mm;
-    font-size: 10pt;
+    font-size: 8.5pt;
     font-weight: 700;
     text-align: center;
     color: #333;
   }
 
   .dist {
-    margin-top: 1.5mm;
-    font-size: 10pt;
+    margin-top: 1mm;
+    font-size: 9pt;
     font-weight: 600;
     color: #333;
     font-variant-numeric: tabular-nums;
   }
 
   footer {
-    margin-top: 8mm;
-    font-size: 9pt;
+    margin-top: 3mm;
+    font-size: 8pt;
     color: #666;
   }
 }
