@@ -42,43 +42,52 @@ const total = computed(() => {
   return `${km(route.distanceKm)} · ${time}`
 })
 
+// Cells run down a column of eleven and on to the top of the next; the
+// arrow points where the next number is. Index -1 is the start cell.
+const ROWS = 11
+const arrow = (i: number) => ((i + 2) % ROWS === 0 ? '↗' : '↓')
+
 const today = computed(() =>
   new Date().toLocaleDateString(locale.value, { day: 'numeric', month: 'long', year: 'numeric' }),
 )
 </script>
 
 <template>
+  <!-- One A4 portrait sheet. Top half: the map, an A5 landscape. Bottom half:
+       the two A6 covers, printed upside down. Fold the bottom half up behind
+       the map, then fold in half: the numbers are the front, the map opens. -->
   <section v-if="steps.length" class="knp-print" aria-hidden="true">
-    <div class="panel map-panel">
+    <div class="half map-half">
       <div class="map-frame">
         <img v-if="printImage" :src="printImage" alt="" />
-        <p v-else class="sequence">{{ steps.map((s) => s.ref).join(' › ') }}</p>
       </div>
       <p class="credit">Meguri · © OpenStreetMap · OpenFreeMap</p>
     </div>
 
-    <div class="panel list-panel">
-    <header>
-      <h1>{{ t('knpLabel') }}</h1>
-      <p class="meta">{{ total }} · {{ store.start?.label }} · {{ today }}</p>
-      <p class="sequence">{{ steps.map((s) => s.ref).join(' › ') }}</p>
-    </header>
-
-    <ol class="strip">
-      <li class="cell connector">
-        <span class="word">{{ t('startingPoint') }}</span>
-        <span class="dist">↓ {{ toFirst }}</span>
-      </li>
-      <li v-for="(step, i) in steps" :key="i" class="cell">
-        <span class="badge">{{ step.ref }}</span>
-        <span class="dist">↓ {{ step.toNext }}</span>
-      </li>
-      <li class="cell connector">
-        <span class="word">{{ t('nav_finish') }}</span>
-      </li>
-    </ol>
-
-    <footer>Meguri · {{ t('knpHint') }}</footer>
+    <div class="half covers">
+      <div class="quarter back">
+        <h1>{{ t('knpLabel') }}</h1>
+        <p class="meta">{{ total }}</p>
+        <p class="meta">{{ store.start?.label }}</p>
+        <p class="meta">{{ today }}</p>
+        <p class="credit">Meguri · {{ t('knpHint') }}</p>
+      </div>
+      <div class="quarter front">
+        <p class="title">{{ t('knpLabel') }} · {{ total }}</p>
+        <ol class="strip">
+          <li class="cell connector">
+            <span class="word">{{ t('startingPoint') }}</span>
+            <span class="dist">{{ arrow(-1) }} {{ toFirst }}</span>
+          </li>
+          <li v-for="(step, i) in steps" :key="i" class="cell">
+            <span class="badge">{{ step.ref }}</span>
+            <span class="dist">{{ arrow(i) }} {{ step.toNext }}</span>
+          </li>
+          <li class="cell connector">
+            <span class="word">{{ t('nav_finish') }}</span>
+          </li>
+        </ol>
+      </div>
     </div>
   </section>
 </template>
@@ -88,41 +97,38 @@ const today = computed(() =>
   display: none;
 }
 
-/* A4 landscape, folded once: two panels of half a side each, 134 mm wide
-   inside the margins and the gutter, which is four cells of 33 mm. Measured:
-   thirty-one cells and the header come to about 176 of the 194 mm a panel
-   offers; a longer ride runs on to a second sheet. */
+/* The sheet itself, no printer margin: the folds fall on the halves and
+   quarters of the paper, so the panels must too. Each panel keeps its own
+   margin inside. */
 @page {
-  size: A4 landscape;
-  margin: 8mm;
+  size: A4 portrait;
+  margin: 0;
 }
 
 @media print {
   .knp-print {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    height: 194mm;
+    grid-template-rows: 148.5mm 148.5mm;
+    width: 210mm;
+    height: 297mm;
     color: #000;
     background: #fff;
     font-family: var(--font);
   }
 
-  .panel {
-    min-width: 0;
+  .half {
+    min-height: 0;
     break-inside: avoid;
   }
 
-  /* The fold: the map's panel ends on a faint dashed line, and the strip
-     starts a gutter away from it. */
-  .map-panel {
+  /* ---- the map: an A5 landscape ---- */
+  .map-half {
     display: flex;
     flex-direction: column;
-    padding-right: 4mm;
-    border-right: 0.3mm dashed #bbb;
+    padding: 8mm 8mm 3mm;
+    border-bottom: 0.3mm dashed #bbb;
   }
 
-  /* The picture takes whatever height the credit leaves, no more: an image
-     sized by its own width ran a line past the panel. */
   .map-frame {
     position: relative;
     flex: 1;
@@ -144,88 +150,99 @@ const today = computed(() =>
     color: #666;
   }
 
-  .list-panel {
-    padding-left: 4mm;
+  /* ---- the covers: two A6 portraits, upside down ----
+     Folded up behind the map they turn over twice, so they are printed
+     turned over twice. In the turned grid the first quarter lands on the
+     sheet's right: the back cover; the second on its left: the front. */
+  .covers {
+    display: grid;
+    grid-template-columns: 105mm 105mm;
+    transform: rotate(180deg);
+  }
+
+  .quarter {
+    min-width: 0;
+    padding: 8mm;
+  }
+
+  .back {
+    border-right: 0.3mm dashed #bbb;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
   }
 
   h1 {
-    margin: 0 0 1.5mm;
-    font-size: 16pt;
+    margin: 0 0 2mm;
+    font-size: 15pt;
     font-weight: 800;
   }
 
   .meta {
-    margin: 0 0 2mm;
+    margin: 0 0 1mm;
     font-size: 9pt;
     color: #333;
   }
 
-  .sequence {
-    margin: 0 0 4mm;
-    font-size: 10.5pt;
-    font-weight: 700;
-    color: #047857;
-    word-spacing: 0.15em;
+  .back .credit {
+    margin-top: 4mm;
   }
 
-  /* Cut along the edges: a column of cells fits a stem, and a long ride
-     runs on to the next page rather than shrinking. */
+  .title {
+    margin: 0 0 3mm;
+    font-size: 9pt;
+    font-weight: 700;
+    color: #333;
+  }
+
+  /* Read down each column, then the next: the arrows say so. Eleven rows
+     fill the cover; a long ride takes a fourth column, narrower. */
   .strip {
     display: grid;
-    grid-template-columns: repeat(4, 33mm);
-    gap: 0;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(11, 1fr);
+    grid-auto-columns: 1fr;
+    height: 118mm;
     margin: 0;
     padding: 0;
     list-style: none;
+    font-variant-numeric: tabular-nums;
   }
 
   .cell {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    padding: 1.5mm 0 1mm;
-    border: 0.3mm dashed #999;
-    margin: 0 -0.3mm -0.3mm 0;
-    break-inside: avoid;
+    gap: 1.5mm;
+    min-width: 0;
+    padding: 0 1mm;
   }
 
   .badge {
     display: grid;
     place-items: center;
-    min-width: 14mm;
-    height: 10mm;
-    padding: 0 2.5mm;
-    border: 0.8mm solid #047857;
-    border-radius: 2.5mm;
+    flex: none;
+    min-width: 10mm;
+    height: 8mm;
+    padding: 0 1.5mm;
+    border: 0.6mm solid #047857;
+    border-radius: 2mm;
     color: #047857;
-    font-size: 18pt;
+    font-size: 13pt;
     font-weight: 800;
-    font-variant-numeric: tabular-nums;
   }
 
   .word {
-    display: grid;
-    place-items: center;
-    height: 10mm;
-    padding: 0 2mm;
-    font-size: 8.5pt;
+    flex: none;
+    font-size: 7.5pt;
     font-weight: 700;
-    text-align: center;
     color: #333;
   }
 
   .dist {
-    margin-top: 1mm;
-    font-size: 9pt;
+    font-size: 8pt;
     font-weight: 600;
     color: #333;
-    font-variant-numeric: tabular-nums;
-  }
-
-  footer {
-    margin-top: 3mm;
-    font-size: 8pt;
-    color: #666;
+    white-space: nowrap;
   }
 }
 </style>

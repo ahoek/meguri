@@ -3,17 +3,19 @@ import { renderRouteMap } from '../infra/print-map'
 import type { Route } from '../domain/route'
 
 /**
- * Printing a knooppuntenroute: a folded A4. The strip of numbers on one
- * half, the route on a map on the other; folded with the print outward, the
- * numbers are the front and opening it is the map.
+ * Printing a knooppuntenroute: an A4 folded twice. The route on a map on
+ * the top half, an A5 landscape; the strip of numbers on an A6 cover below
+ * it, printed upside down so that folding the bottom half up behind the map
+ * and then folding in half leaves the numbers as the front and the map as
+ * what opens.
  *
  * The map has to be a picture before the print dialog opens, so this
  * renders it first and prints after. PrintStrip.vue reads both refs.
  */
 
-// Half an A4 landscape side inside the margins, in CSS pixels at 96 dpi:
-// about 134 by 194 mm.
-const PANEL_PX = { width: 506, height: 733 }
+// The top half of an A4 portrait sheet inside its margins, an A5 landscape
+// of about 194 by 133 mm, in CSS pixels at 96 dpi.
+const PANEL_PX = { width: 733, height: 502 }
 
 export const printImage = ref('')
 export const printing = ref(false)
