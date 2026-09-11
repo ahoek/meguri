@@ -91,16 +91,36 @@ function applyFraming() {
   camera.setFraming(navFraming())
 }
 
-defineExpose({
-  recenter() {
-    // Glide back from wherever the user panned to: seed the eased camera
-    // with the current view and let the follow loop close the gap.
-    camera.seedFromView()
-    zoomHeld = false // asking to be recentred is asking for our zoom back
-    camera.setFraming(navFraming())
-    camera.start()
-  },
-})
+function recenter() {
+  clearTimeout(refollowTimer)
+  // Glide back from wherever the user panned to: seed the eased camera
+  // with the current view and let the follow loop close the gap.
+  camera.seedFromView()
+  zoomHeld = false // asking to be recentred is asking for our zoom back
+  camera.setFraming(navFraming())
+  camera.start()
+}
+
+defineExpose({ recenter })
+
+/**
+ * A swipe hands the camera to the rider; nobody handed it back. Reported
+ * from a ride: a brushed screen, and the map stayed where the thumb left
+ * it for the rest of the leg, following nothing. So a released camera
+ * returns on its own once the fingers have been off the map for a while —
+ * long enough to read what was swiped to, short enough that the next turn
+ * is not missed for it. Recenter still brings it back at once.
+ */
+const REFOLLOW_MS = 12_000
+let refollowTimer: ReturnType<typeof setTimeout> | undefined
+
+function armRefollow() {
+  clearTimeout(refollowTimer)
+  if (!nav.active || camera.isFollowing()) return
+  refollowTimer = setTimeout(() => {
+    if (nav.active && !camera.isFollowing()) recenter()
+  }, REFOLLOW_MS)
+}
 
 /** Latitude the route sits at — width in metres depends on where you are. */
 function routeLat() {
@@ -307,6 +327,7 @@ function enterNavigation() {
 }
 
 function exitNavigation() {
+  clearTimeout(refollowTimer)
   styleTweaks.setCarPoisHidden(false)
   camera.stop()
   puck.remove()
@@ -436,13 +457,20 @@ onMounted(() => {
   // originalEvent.
   map.on('dragstart', () => {
     if (nav.active) camera.release()
+    clearTimeout(refollowTimer)
   })
   map.on('rotatestart', (e) => {
     if (nav.active && e.originalEvent) camera.release()
+    clearTimeout(refollowTimer)
   })
   map.on('pitchstart', (e) => {
     if (nav.active && e.originalEvent) camera.release()
+    clearTimeout(refollowTimer)
   })
+  // The gesture's end starts the clock on taking the camera back.
+  for (const ended of ['dragend', 'rotateend', 'pitchend', 'zoomend'] as const) {
+    map.on(ended, armRefollow)
+  }
 
   // A pinch means you want a different zoom than the one we chose, but you
   // are still following. Remembered, so the next junction re-tilts the map
@@ -458,7 +486,10 @@ onMounted(() => {
   const canvas = map.getCanvasContainer()
   canvas.addEventListener('touchstart', () => camera.holdForTouch(true), { passive: true })
   const touchDone = (e: TouchEvent) => {
-    if (e.touches.length === 0) camera.holdForTouch(false)
+    if (e.touches.length === 0) {
+      camera.holdForTouch(false)
+      armRefollow()
+    }
   }
   canvas.addEventListener('touchend', touchDone, { passive: true })
   canvas.addEventListener('touchcancel', touchDone, { passive: true })
