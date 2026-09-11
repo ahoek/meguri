@@ -160,29 +160,43 @@ export function speakManeuver({
   )
 }
 
-// Said once, as the junction comes into view: far enough out to read the
-// sign as you arrive, close enough that the turns before it have been said.
-const JUNCTION_ANNOUNCE_M = 120
+// Said once, close: the number is read off the sign as you reach it, and
+// at 120 m it came long before the sign was in sight.
+const JUNCTION_ANNOUNCE_M = 40
+// A turn this close to the junction is the turn at the junction.
+const TURN_AT_JUNCTION_KM = 0.04
 
 /**
  * On a knooppuntenroute the numbers are the route, so each one is called as
- * you reach it, with the next to look for on the sign: "Junction 54, then
- * follow the signs to 46". The turn-by-turn carries on underneath — this is
- * the extra that lets the phone stay in the pocket between the signs.
+ * you reach it, with what to do there and the next to look for on the sign:
+ * "Knooppunt 54, rechts afslaan. Volg de bordjes naar 46". The turn is the
+ * ordinary instruction for that spot, folded in so it is not said twice;
+ * with no turn there it says straight on, because at a junction that is
+ * the thing you want to know.
  */
-export function speakJunction(junctions: NodeStop[], alongKm: number) {
+export function speakJunction(
+  junctions: NodeStop[],
+  alongKm: number,
+  maneuver: (Maneuver & { distanceM: number }) | null,
+) {
   const index = junctions.findIndex((j) => j.atKm * 1000 > alongKm * 1000 - JUNCTION_ANNOUNCE_M)
   if (index < 0 || index <= saidJunction) return
   const here = junctions[index]
   if ((here.atKm - alongKm) * 1000 > JUNCTION_ANNOUNCE_M) return
   saidJunction = index
+
+  const atJunction =
+    maneuver && Math.abs(maneuver.atKm - here.atKm) <= TURN_AT_JUNCTION_KM ? maneuver : null
+  const turn = t(`nav_${atJunction?.kind ?? 'continue'}`)
+  // Folded in here, so the separate call for the same turn stays quiet.
+  if (atJunction) spokenFor.set(`${atJunction.index}:${atJunction.kind}`, 0)
+
   const next = junctions[index + 1]
-  // Queued, not interrupting: a turn being said at the junction matters
-  // more than the number, and the number can wait the two seconds.
   say(
-    next
-      ? t('knpSpoken').replace('{a}', here.ref).replace('{b}', next.ref)
-      : t('knpSpokenLast').replace('{a}', here.ref),
+    (next ? t('knpSpoken') : t('knpSpokenLast'))
+      .replace('{a}', here.ref)
+      .replace('{turn}', turn)
+      .replace('{b}', next?.ref ?? ''),
     { interrupt: false },
   )
 }

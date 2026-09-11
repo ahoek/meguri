@@ -473,7 +473,7 @@ function onPosition(pos: GeolocationPosition) {
       offRoute: nav.offRoute,
       toFinishM,
     })
-    if (!nav.offRoute && !nav.arrived) speakJunction(junctions, alongKm)
+    if (!nav.offRoute && !nav.arrived) speakJunction(junctions, alongKm, maneuver)
   }
 }
 
