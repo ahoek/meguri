@@ -44,6 +44,60 @@ export const MANEUVER: Record<number, string> = {
 
 const GENTLE_ANGLE = 18 // degrees; below this a "slight" turn is just a curve
 
+/**
+ * The line's own turn at a vertex, in degrees, right positive.
+ *
+ * Taken over a few metres either side rather than to the adjacent vertices:
+ * mapped curves come as many short segments, and a bearing across one of
+ * those is noise. Null where the line has no room on either side.
+ */
+const TURN_REACH_KM = 0.012
+
+export function geometricTurn(coords: LngLat[], index: number): number | null {
+  let back = index - 1
+  while (back > 0 && distanceKm(coords[back], coords[index]) < TURN_REACH_KM) back--
+  let ahead = index + 1
+  while (ahead < coords.length - 1 && distanceKm(coords[index], coords[ahead]) < TURN_REACH_KM) {
+    ahead++
+  }
+  if (back < 0 || ahead >= coords.length) return null
+  if (
+    distanceKm(coords[back], coords[index]) < TURN_REACH_KM / 2 ||
+    distanceKm(coords[index], coords[ahead]) < TURN_REACH_KM / 2
+  ) {
+    return null
+  }
+  return shortestTurn(
+    bearingBetween(coords[back], coords[index]),
+    bearingBetween(coords[index], coords[ahead]),
+  )
+}
+
+// A hint that says right where the line clearly turns left is the wrong
+// hint: reported from a ride, the voice said rechtsaf while the map bent
+// left. Past this the geometry is believed and the hint mirrored.
+const CONTRADICTION_DEG = 30
+const MIRROR: Record<string, string> = {
+  left: 'right',
+  right: 'left',
+  slightLeft: 'slightRight',
+  slightRight: 'slightLeft',
+  sharpLeft: 'sharpRight',
+  sharpRight: 'sharpLeft',
+  keepLeft: 'keepRight',
+  keepRight: 'keepLeft',
+}
+
+/** The hint's kind, or its mirror image where the line plainly disagrees. */
+export function reconcileWithLine(kind: string, coords: LngLat[], index: number): string {
+  const mirrored = MIRROR[kind]
+  if (!mirrored) return kind
+  const turn = geometricTurn(coords, index)
+  if (turn == null || Math.abs(turn) < CONTRADICTION_DEG) return kind
+  const saysRight = kind.toLowerCase().includes('right')
+  return (turn > 0) === saysRight ? kind : mirrored
+}
+
 function isGentleBend(maneuver: Maneuver) {
   return (
     (maneuver.kind === 'slightLeft' || maneuver.kind === 'slightRight') &&
@@ -91,7 +145,7 @@ export function prepareRoute(route: Route): PreparedRoute {
     .filter(([index, command]) => MANEUVER[command] && index < coords.length)
     .map(([index, command, exit, , angle]) => ({
       index,
-      kind: MANEUVER[command],
+      kind: reconcileWithLine(MANEUVER[command], coords, index),
       exit,
       angle: angle ?? 0,
       atKm: cumulative[index],

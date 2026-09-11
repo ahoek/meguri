@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  reconcileWithLine,
   prepareRoute,
   positionAtKm,
   bearingAlong,
@@ -270,5 +271,25 @@ describe('which leg of a there-and-back you are on', () => {
 
     expect(fix.alongKm).toBeCloseTo(0.2, 2)
     expect(fix.offRouteM).toBeLessThan(8)
+  })
+})
+
+
+describe('a hint that contradicts the line', () => {
+  // Reported from a ride: the voice said rechtsaf while the map bent left.
+  // Whatever the router meant, the line is what the rider sees, so the
+  // hint is mirrored to agree with it.
+  const corner = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 100, 100), offset(ORIGIN, 100, 200)]
+
+  it('mirrors a turn that says right where the line turns left', () => {
+    expect(reconcileWithLine('right', corner, 1)).toBe('left')
+    expect(reconcileWithLine('slightRight', corner, 1)).toBe('slightLeft')
+  })
+
+  it('leaves a hint alone where the line agrees, or says nothing clear', () => {
+    expect(reconcileWithLine('left', corner, 1)).toBe('left')
+    const straight = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 200, 0), offset(ORIGIN, 300, 0)]
+    expect(reconcileWithLine('right', straight, 1)).toBe('right')
+    expect(reconcileWithLine('roundabout', corner, 1)).toBe('roundabout')
   })
 })

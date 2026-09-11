@@ -615,7 +615,14 @@ export function turnHintsAlong(coords: LngLat[], from: number, to: number): numb
     while (back > from && distanceKm(coords[back], coords[i]) < TURN_REACH_KM) back--
     let ahead = i + 1
     while (ahead < to && distanceKm(coords[i], coords[ahead]) < TURN_REACH_KM) ahead++
-    if (samePlace(coords[back], coords[i]) || samePlace(coords[i], coords[ahead])) continue
+    // No room to measure over: at the ends of the stretch a bearing taken
+    // across a couple of metres is noise, and noise here is a spoken turn.
+    if (
+      distanceKm(coords[back], coords[i]) < TURN_REACH_KM / 2 ||
+      distanceKm(coords[i], coords[ahead]) < TURN_REACH_KM / 2
+    ) {
+      continue
+    }
 
     let turn = bearingDeg(coords[i], coords[ahead]) - bearingDeg(coords[back], coords[i])
     turn = ((turn + 540) % 360) - 180 // (-180, 180], positive is right
@@ -638,8 +645,6 @@ export function turnHintsAlong(coords: LngLat[], from: number, to: number): numb
   }
   return hints
 }
-
-const samePlace = (a: LngLat, b: LngLat) => a[0] === b[0] && a[1] === b[1]
 
 /**
  * The planned junctions, placed on the finished line.
