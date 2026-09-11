@@ -19,13 +19,13 @@ import type { NodeStop } from '../domain/knooppunten'
 // we want the *smallest* band the distance still fits in, so the near
 // warnings fire as you close in rather than being swallowed by the far one.
 //
-// Per profile: at 16 km/h thirty metres is seven seconds, and the rider
-// reported the turn arriving with the words still in the air. The bike's
-// bands sit further out so each is said with the same time in hand a
-// walker gets.
+// The call at the turn itself comes late and close, on the rider's own
+// numbers: twenty metres on the bike, ten on foot. At thirty it was said
+// with the turn not yet in sight, and at fifteen a fix every four or five
+// metres could skip the band. The two warnings before it are shared.
 const THRESHOLDS: Record<Profile, number[]> = {
-  walk: [30, 150, 400],
-  bike: [55, 220, 500],
+  walk: [10, 150, 400],
+  bike: [20, 150, 400],
 }
 let profile: Profile = 'walk'
 
@@ -33,6 +33,7 @@ let profile: Profile = 'walk'
 export function setGuidanceProfile(mode: Profile) {
   profile = mode
 }
+
 const VOICE_LANG: Record<string, string> = { en: 'en-GB', nl: 'nl-NL', ja: 'ja-JP' }
 
 // Spoken units are spelled out — a synthesiser reads "90 m" as "ninety m".
