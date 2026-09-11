@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readGreen } from '../src/infra/brouter'
+import { profileSource, readGreen } from '../src/infra/brouter'
 import type { LngLat } from '../src/domain/geo'
 
 /**
@@ -90,5 +90,33 @@ describe('reading green out of the message table', () => {
   it('has nothing to say about a response with no messages at all', () => {
     expect(readGreen(undefined, coords)).toEqual({ fraction: null, mask: null })
     expect(readGreen([], coords)).toEqual({ fraction: null, mask: null })
+  })
+})
+
+/**
+ * The uploaded profile is the nature .brf with its switches set to order:
+ * the estimates for nature, `stick_to_cycleroutes` for a knooppuntenroute.
+ */
+describe('the profile uploaded for a request', () => {
+  const setting = (source: string, name: string) =>
+    new RegExp(`^assign\\s+${name}\\s*=\\s*(true|false)`, 'm').exec(source)?.[1]
+
+  it('keeps the estimates on and the network off for a nature ride', () => {
+    const source = profileSource('bike', { nature: true, network: false })
+    expect(setting(source, 'consider_forest')).toBe('true')
+    expect(setting(source, 'stick_to_cycleroutes')).toBe('false')
+  })
+
+  it('turns the network on for a knooppuntenroute', () => {
+    const source = profileSource('bike', { nature: true, network: true })
+    expect(setting(source, 'stick_to_cycleroutes')).toBe('true')
+    expect(setting(source, 'consider_forest')).toBe('true')
+  })
+
+  it('turns the estimates off when nature was not asked for', () => {
+    const source = profileSource('bike', { nature: false, network: true })
+    expect(setting(source, 'consider_forest')).toBe('false')
+    expect(setting(source, 'consider_town')).toBe('false')
+    expect(setting(source, 'stick_to_cycleroutes')).toBe('true')
   })
 })

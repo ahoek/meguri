@@ -67,6 +67,18 @@ export default defineConfig({
             },
           },
           {
+            // The junction-network tiles: static data beside the app, read
+            // only when the knooppunten switch is on, served from cache and
+            // refreshed behind it once they are.
+            urlPattern: /\/knooppunten\/[^/]+\.json$/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'knooppunten',
+              expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'StaleWhileRevalidate',
             options: { cacheName: 'google-fonts-css' },

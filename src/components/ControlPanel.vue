@@ -15,6 +15,9 @@ import {
   confirmStartCandidate,
   dismissStartCandidate,
   holdPlanner,
+  setKnooppunten,
+  knooppuntenOffered,
+  knooppuntenActive,
 } from '../app/store'
 import { shareGpx, canShareGpx } from '../infra/gpx'
 import { startNavigation } from '../app/nav-session'
@@ -125,8 +128,14 @@ function onStartNavigation(demo = false) {
 
 const wpHint = computed(() => {
   if (store.waypointMode) return t('wpArmed')
-  return store.waypoints.length ? t('wpHave') : t('wpHint')
+  if (!store.waypoints.length) return t('wpHint')
+  // On the junction network a pin can't be exact — the ride is confined to
+  // the legs — so say what it does do rather than let it look precise.
+  return knooppuntenActive() ? t('wpViaNodes') : t('wpHave')
 })
+
+/** The numbers of the knooppuntenroute on screen, in riding order. */
+const junctions = computed(() => store.route?.junctions ?? [])
 
 const stopLabel = (index: number) =>
   locale.value === 'ja' ? `${t('wpStopN')}${index + 1}` : `${t('wpStopN')} ${index + 1}`
@@ -375,7 +384,7 @@ const routeStats = computed(() => {
            second loop mark sitting right above the brand's own was the logo
            apparently seeing double. -->
       <div v-if="store.start && working" class="answer answer-plotting" role="status">
-        {{ t('plotting') }}
+        {{ t(store.knooppuntenLoading ? 'knpLoading' : 'plotting') }}
       </div>
       <div v-else-if="routeStats" class="answer">
         <button class="answer-stats" :aria-label="t('panelToggle')" @click="collapsed = !collapsed">
@@ -643,6 +652,46 @@ const routeStats = computed(() => {
         @change="setNature(($event.target as HTMLInputElement).checked)"
       />
     </label>
+
+    <!-- Cycling only, and only where the network exists (see
+         knooppuntenOffered). The block is the feature end to end: the switch,
+         and beneath it the outcome — the numbers to ride, or the admission
+         that the network had no ride of this length. -->
+    <div v-if="knooppuntenOffered()" class="knp-block">
+      <label class="setting-row nature-row">
+        <span class="setting-text">
+          <strong class="nature-title">
+            {{ t('knpLabel') }}
+            <span class="knp-badge" aria-hidden="true">45</span>
+          </strong>
+          <small>{{ t('knpHint') }}</small>
+        </span>
+        <input
+          class="switch"
+          type="checkbox"
+          role="switch"
+          :checked="store.knooppunten"
+          @change="setKnooppunten(($event.target as HTMLInputElement).checked)"
+        />
+      </label>
+      <ol v-if="junctions.length" class="knp-list" :aria-label="t('knpSequence')">
+        <li v-for="(stop, i) in junctions" :key="`${stop.ref}-${i}`" class="knp-num">
+          {{ stop.ref }}
+        </li>
+      </ol>
+      <!-- Not a footnote: an ordinary loop where a knooppuntenroute was
+           asked for is the one outcome here that must not pass unnoticed. -->
+      <div v-else-if="store.knooppunten && store.knooppuntenFallback && store.route" class="knp-notice" role="status">
+        <svg class="knp-notice-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 8v5m0 3.5v.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" />
+        </svg>
+        <span class="knp-notice-text">{{ t(`knpFallback_${store.knooppuntenFallback}`) }}</span>
+        <button v-if="store.knooppuntenFallback !== 'none'" class="knp-retry" @click="generate({ shuffle: true })">
+          {{ t('retryRoute') }}
+        </button>
+      </div>
+    </div>
 
     <!-- Things you do *with* a route rather than *to* it. They used to hide
          behind a dot menu on the result card; with the answer consolidated
@@ -1741,6 +1790,103 @@ const routeStats = computed(() => {
   translate: 0 14px;
 }
 
+
+/* ---- knooppunten ---- */
+.knp-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* A signpost in miniature beside the title: green on white with a green
+   rim, which is what the real ones look like. Grey until the switch is on. */
+.knp-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--ink-3);
+  border: 1.5px solid var(--ink-3);
+  opacity: 0.7;
+  transition: color 0.25s, border-color 0.25s, background 0.25s, opacity 0.25s;
+}
+
+.nature-row:has(.switch:checked) .knp-badge {
+  color: #047857;
+  border-color: #047857;
+  background: #fff;
+  opacity: 1;
+}
+
+/* The sequence, read left to right the way the signs read. */
+.knp-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.knp-list li + li::before {
+  content: '›';
+  margin-right: 6px;
+  color: var(--ink-3);
+  font-weight: 700;
+}
+
+.knp-list li {
+  display: flex;
+  align-items: center;
+}
+
+.knp-num {
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #047857;
+}
+
+.knp-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #b45309;
+  color: var(--ink);
+  background: rgba(180, 83, 9, 0.12);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.knp-notice-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: #d97706;
+}
+
+.knp-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.knp-retry {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: #b45309;
+}
 
 /* ---- nature toggle ---- */
 .nature-row {

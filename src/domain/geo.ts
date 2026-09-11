@@ -38,6 +38,27 @@ export function distanceKm([lng1, lat1]: LngLat, [lng2, lat2]: LngLat): number {
 }
 
 /**
+ * Closest point on segment a→b, in flat local coordinates.
+ *
+ * Route vertices sit hundreds of metres apart on a straight, so measuring to
+ * the nearest one badly understates how close something beside the road is.
+ */
+export function closestOnSegment(a: LngLat, b: LngLat, p: LngLat): LngLat {
+  // Scale longitude so a degree of each axis covers a similar distance.
+  const k = Math.cos(rad(a[1])) || 1e-6
+  const ax = a[0] * k
+  const bx = b[0] * k
+  const px = p[0] * k
+  const dx = bx - ax
+  const dy = b[1] - a[1]
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return a
+  let t = ((px - ax) * dx + (p[1] - a[1]) * dy) / lenSq
+  t = Math.max(0, Math.min(1, t))
+  return [(ax + t * dx) / k, a[1] + t * dy]
+}
+
+/**
  * Via-points for a loop: the start sits on a circle of radius r whose center
  * lies at `bearing` from the start. The other points are spread around that
  * same circle, walked clockwise or counter-clockwise.

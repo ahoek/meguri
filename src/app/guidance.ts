@@ -7,6 +7,7 @@ import {
   persistVoiceChoice,
 } from '../infra/speech'
 import type { Maneuver } from '../domain/navigation'
+import type { NodeStop } from '../domain/knooppunten'
 
 /**
  * Guidance policy: which announcements to make, when, and with which words.
@@ -29,6 +30,7 @@ const SPOKEN_UNIT: Record<string, { m: string; km: string }> = {
 let spokenFor = new Map<string, number>() // maneuver key → smallest threshold said
 let saidArrived = false
 let saidOffRoute = false
+let saidJunction = -1 // index of the last junction announced
 
 const voiceLang = () => VOICE_LANG[locale.value] ?? 'en-GB'
 
@@ -41,6 +43,7 @@ export function resetSpeech() {
   spokenFor = new Map()
   saidArrived = false
   saidOffRoute = false
+  saidJunction = -1
   cancelSpeech()
 }
 
@@ -138,5 +141,29 @@ export function speakManeuver({
     `${maneuver.index}:${maneuver.kind}`,
     t(`nav_${maneuver.kind}`),
     maneuver.distanceM,
+  )
+}
+
+// Said once, as the junction comes into view: far enough out to read the
+// sign as you arrive, close enough that the turns before it have been said.
+const JUNCTION_ANNOUNCE_M = 120
+
+/**
+ * On a knooppuntenroute the numbers are the route, so each one is called as
+ * you reach it, with the next to look for on the sign: "Junction 54, then
+ * follow the signs to 46". The turn-by-turn carries on underneath — this is
+ * the extra that lets the phone stay in the pocket between the signs.
+ */
+export function speakJunction(junctions: NodeStop[], alongKm: number) {
+  const index = junctions.findIndex((j) => j.atKm * 1000 > alongKm * 1000 - JUNCTION_ANNOUNCE_M)
+  if (index < 0 || index <= saidJunction) return
+  const here = junctions[index]
+  if ((here.atKm - alongKm) * 1000 > JUNCTION_ANNOUNCE_M) return
+  saidJunction = index
+  const next = junctions[index + 1]
+  say(
+    next
+      ? t('knpSpoken').replace('{a}', here.ref).replace('{b}', next.ref)
+      : t('knpSpokenLast').replace('{a}', here.ref),
   )
 }

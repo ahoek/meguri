@@ -25,6 +25,21 @@ describe('the GPX handed to the phone', () => {
     expect(gpx).toContain('lat="52.367700" lon="4.895500"/>')
   })
 
+  // A knooppuntenroute's numbers ride along as waypoints: that is how a head
+  // unit shows the next junction as it nears.
+  it('writes the junctions of a knooppuntenroute as waypoints', () => {
+    const r = route([[4.8945, 52.3667], [4.8955, 52.3677]])
+    r.junctions = [{ ref: '45', lngLat: [4.8955, 52.3677], atKm: 0.1 }]
+    const gpx = gpxDocument(r, 'ride')
+
+    expect(gpx).toContain('<wpt lat="52.367700" lon="4.895500"><name>45</name></wpt>')
+    expect(gpx.indexOf('<wpt')).toBeLessThan(gpx.indexOf('<trk>'))
+  })
+
+  it('writes no waypoints for an ordinary loop', () => {
+    expect(gpxDocument(route([[4.8945, 52.3667]]), 'walk')).not.toContain('<wpt')
+  })
+
   // The track name carries a translated word. An ampersand in a future
   // translation must not be the thing that makes the file unreadable.
   it('escapes the track name rather than trusting it', () => {

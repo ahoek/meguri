@@ -192,6 +192,24 @@ input {
   cursor: pointer;
 }
 
+/* ---- knooppunt markers ---- */
+/* Green on white, like the signposts. Fixed colours: the tiles stay light
+   in both themes, same as the waypoint pins. */
+.knp-marker {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #047857;
+  font: 700 12.5px/1 var(--font);
+  border: 2px solid #047857;
+  box-shadow: 0 2px 8px rgba(12, 17, 27, 0.35);
+  pointer-events: none;
+}
+
 /* ---- navigation puck ---- */
 .nav-puck {
   width: 46px;

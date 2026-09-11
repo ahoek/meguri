@@ -13,9 +13,17 @@ export function gpxDocument(route: Route, kind: string) {
         : `      <trkpt ${pos}/>`
     })
     .join('\n')
+  // A knooppuntenroute's numbers ride along as waypoints, which is how a
+  // head unit shows them: the next number on screen as the junction nears.
+  const junctions = (route.junctions ?? [])
+    .map(
+      ({ ref, lngLat: [lng, lat] }) =>
+        `  <wpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}"><name>${escapeXml(ref)}</name></wpt>`,
+    )
+    .join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="Meguri" xmlns="http://www.topografix.com/GPX/1/1">
-  <trk>
+${junctions ? junctions + '\n' : ''}  <trk>
     <name>${escapeXml(trackName(route, kind))}</name>
     <trkseg>
 ${points}

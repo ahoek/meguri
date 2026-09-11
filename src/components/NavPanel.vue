@@ -282,6 +282,47 @@ const progress = computed(() => {
 })
 
 /**
+ * The junction rail.
+ *
+ * On a knooppuntenroute the numbers are the route — you ride 45, then 78,
+ * then 12 — so while navigating they matter more than the street you happen
+ * to be on. They run along the top of the dashboard in riding order: the
+ * ones behind you dimmed, the one you are riding towards filled in with the
+ * distance to it, the rest of the ride trailing off to the right. The rail
+ * scrolls itself so the next number is always the first you see.
+ */
+const PASSED_SLACK_KM = 0.02
+
+const junctions = computed(() =>
+  (store.route?.junctions ?? []).map((stop) => ({
+    ref: stop.ref,
+    atKm: stop.atKm,
+    passed: stop.atKm <= nav.alongKm - PASSED_SLACK_KM,
+  })),
+)
+
+const nextJunction = computed(() => junctions.value.findIndex((j) => !j.passed))
+
+const toNextJunction = computed(() => {
+  const next = junctions.value[nextJunction.value]
+  if (!next) return ''
+  return formatDistance(Math.max(0, (next.atKm - nav.alongKm) * 1000))
+})
+
+const railEl = ref<HTMLElement | null>(null)
+
+watch(
+  nextJunction,
+  (index) => {
+    const rail = railEl.value
+    const stop = rail?.children[index] as HTMLElement | undefined
+    if (!rail || !stop) return
+    rail.scrollTo({ left: Math.max(0, stop.offsetLeft - 18), behavior: 'smooth' })
+  },
+  { flush: 'post' },
+)
+
+/**
  * Which of the banner's four faces is up. One key for the whole face, so a
  * change crosses over as a single move — the old face slips out while the new
  * one rises in — instead of icon and words each blinking on their own.
@@ -577,6 +618,26 @@ function onMetricsScroll() {
     <div ref="dashEl" class="dash">
       <div class="progress" role="presentation">
         <div class="progress-fill" :style="{ width: progress + '%' }"></div>
+      </div>
+      <!-- The numbers, riding order left to right; see `junctions`. -->
+      <div
+        v-if="junctions.length"
+        ref="railEl"
+        class="knp-rail"
+        role="list"
+        :aria-label="t('knpSequence')"
+      >
+        <div
+          v-for="(j, i) in junctions"
+          :key="i"
+          role="listitem"
+          class="knp-stop"
+          :class="{ passed: j.passed, next: i === nextJunction }"
+          :aria-current="i === nextJunction ? 'step' : undefined"
+        >
+          <span class="knp-stop-num">{{ j.ref }}</span>
+          <span v-if="i === nextJunction" class="knp-stop-dist">{{ toNextJunction }}</span>
+        </div>
       </div>
       <!-- Four figures, two in view, the band snapping to the rest. The pair
            you care about is the pair you leave it on — the scroll position is
@@ -1063,6 +1124,79 @@ function onMetricsScroll() {
   color: var(--ink-2);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* ---- junction rail ---- */
+.knp-rail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 18px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Reads and scrolls; a touch here is not a swipe on the map beneath. */
+  touch-action: pan-x;
+}
+
+.knp-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.knp-stop {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* An arrow between the numbers, the way the signs read. */
+.knp-stop + .knp-stop::before {
+  content: '›';
+  margin-right: 5px;
+  color: var(--ink-3);
+  font-weight: 700;
+}
+
+/* Green on white with a green rim — the Dutch signpost, more or less. Fixed
+   colours, like the markers on the map: the sign does not have a dark mode. */
+.knp-stop-num {
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 7px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 2px solid #047857;
+  color: #047857;
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.3s, transform 0.3s, background 0.3s, color 0.3s;
+}
+
+/* Behind you: still there, no longer asking for attention. */
+.knp-stop.passed .knp-stop-num {
+  opacity: 0.4;
+  transform: scale(0.85);
+}
+
+/* The one you are riding towards: the sign, filled in. */
+.knp-stop.next .knp-stop-num {
+  min-width: 40px;
+  height: 40px;
+  background: #047857;
+  color: #ffffff;
+  font-size: 20px;
+  box-shadow: 0 4px 14px -2px rgba(4, 120, 87, 0.55);
+}
+
+.knp-stop-dist {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
   white-space: nowrap;
 }
 

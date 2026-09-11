@@ -12,7 +12,7 @@ import {
   bearingAlong,
   AT_START_M,
 } from '../domain/navigation'
-import { speakManeuver, resetSpeech } from './guidance'
+import { speakJunction, speakManeuver, resetSpeech } from './guidance'
 import {
   startCompass,
   stopCompass,
@@ -27,6 +27,7 @@ import { distanceKm } from '../domain/geo'
 import type { LngLat } from '../domain/geo'
 import type { Route, Profile } from '../domain/route'
 import type { Maneuver, PreparedRoute } from '../domain/navigation'
+import type { NodeStop } from '../domain/knooppunten'
 
 interface NavState {
   active: boolean
@@ -168,6 +169,7 @@ let rejoinAbort: AbortController | null = null
 let rejoinFrom: LngLat | null = null
 let profileMode: Profile = 'walk'
 let natureOn = true
+let junctions: NodeStop[] = []
 let simulation: Simulation | null = null
 
 /**
@@ -471,6 +473,7 @@ function onPosition(pos: GeolocationPosition) {
       offRoute: nav.offRoute,
       toFinishM,
     })
+    if (!nav.offRoute && !nav.arrived) speakJunction(junctions, alongKm)
   }
 }
 
@@ -580,6 +583,7 @@ export function startNavigation(
 
   profileMode = mode
   natureOn = nature
+  junctions = route.junctions ?? []
   prepared = prepareRoute(route)
   lastIndex = 0
   alongKm = 0

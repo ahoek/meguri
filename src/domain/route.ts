@@ -1,5 +1,16 @@
 import { loopViaPoints, loopViaWithWaypoints, distanceKm } from './geo'
+import {
+  findNodeLoop,
+  legKey,
+  nearestJunction,
+  stitchLeg,
+  stopsForPlan,
+  turnHintsAlong,
+  withLegKm,
+  withoutLeg,
+} from './knooppunten'
 import type { LngLat } from './geo'
+import type { LegWay, NodeNetwork, NodeStop } from './knooppunten'
 
 // [pointIndex, command, exitNumber, distanceToNext, angle] per maneuver.
 export type VoiceHint = number[]
@@ -23,6 +34,13 @@ export interface Route {
    * than none.
    */
   greenMask?: boolean[] | null
+  /**
+   * On a knooppuntenroute, the numbered junctions it passes, in riding order
+   * and placed along the line. Absent on an ordinary loop. Part of the route
+   * rather than kept beside it, so it survives a refresh with the route and
+   * travels into navigation with it.
+   */
+  junctions?: NodeStop[]
 }
 
 export type Profile = 'walk' | 'bike'
@@ -573,4 +591,225 @@ export async function generateLoop({
 
   if (!best) throw (lastError as Error) ?? new Error('No route found')
   return best
+}
+
+// How many times the plan may be redone — for a leg that proves unusable,
+// or for lengths that prove wrong — before the best ride seen is taken. A
+// long ride has a dozen legs and more; one bad relation must not cost it.
+const PLAN_ROUNDS = 8
+// A leg's tagged length is trusted to about this; past it, the geometry
+// corrects the plan. Measured on a 40 km ride: five of seventeen legs were
+// tagged a third to double their ridden length even summed one-way, and the
+// ride came out 35 km.
+const LEG_KM_TRUST = 0.03
+const RIDE_LENGTH_BAND = 0.08
+
+/**
+ * A ride along the signposted network: 32 → 33 → 34 and home.
+ *
+ * Nothing like the circle-and-rescale above, because the shape isn't ours to
+ * choose — the legs exist, and a followable ride is a walk along them. The
+ * graph search picks the sequence from the legs' real lengths. Then the
+ * route between junctions *is* each leg's own geometry, its ways stitched
+ * in riding direction: not a router's imitation of it, which — even led by
+ * via points — nipped into side streets to reach them and left stubs on the
+ * line. The router only draws the two ends, doorstep to first number and
+ * last number home, with the profile's preference for the cycle network,
+ * since those stretches have signs too.
+ *
+ * Returns the plan alongside the route, since the numbers are the point;
+ * null where the network offers no ride near the target.
+ */
+export async function generateNodeLoop({
+  start,
+  targetKm,
+  network,
+  waypoints = [],
+  routeThrough,
+  legGeometry,
+  random,
+}: {
+  start: LngLat
+  targetKm: number
+  network: NodeNetwork
+  /** The rider's own stops, matched to the junctions nearest them. */
+  waypoints?: LngLat[]
+  routeThrough: RouteThrough
+  /** The member ways of the given legs, by relation id. */
+  legGeometry: (ids: number[]) => Promise<Map<number, LegWay[]>>
+  random?: () => number
+}): Promise<{ route: Route; plan: string[] } | null> {
+  // A leg whose ways turn out not to join its junctions is struck out and
+  // the ride planned again without it — a few times, not forever.
+  let net = network
+  let best: { plan: string[]; lines: LngLat[][]; off: number } | null = null
+  for (let round = 0; round < PLAN_ROUNDS; round++) {
+    const plan = planRide(net, start, targetKm, waypoints, random)
+    if (!plan) break
+
+    const legs = plan.slice(0, -1).map((a, i) => net.legs.get(legKey(a, plan[i + 1]))!)
+    const ways = await legGeometry(legs.map((leg) => leg.id))
+
+    const lines: LngLat[][] = []
+    let broken: [string, string] | null = null
+    for (let i = 0; i < legs.length; i++) {
+      const line = stitchLeg(
+        ways.get(legs[i].id) ?? [],
+        net.at.get(plan[i])!,
+        net.at.get(plan[i + 1])!,
+      )
+      if (!line) {
+        broken = [plan[i], plan[i + 1]]
+        break
+      }
+      lines.push(line)
+    }
+    if (broken) {
+      net = withoutLeg(net, broken[0], broken[1])
+      continue
+    }
+
+    // The legs' geometry is the truth about their length, and the plan was
+    // made on tags that are not always. Correct what was learnt; if the
+    // ride is off the target, plan again knowing better — the legs seen so
+    // far keep their measured lengths, so the rounds converge — and keep
+    // the closest ride seen in case they run out.
+    let legsKm = 0
+    for (let i = 0; i < legs.length; i++) {
+      const km = polylineKm(lines[i])
+      legsKm += km
+      if (Math.abs(km - legs[i].km) > legs[i].km * LEG_KM_TRUST) {
+        net = withLegKm(net, plan[i], plan[i + 1], km)
+      }
+    }
+    const first = lines[0][0]
+    const last = lines[lines.length - 1][lines[lines.length - 1].length - 1]
+    const estimate = legsKm + (distanceKm(start, first) + distanceKm(start, last)) * 1.25
+    const off = Math.abs(estimate - targetKm) / targetKm
+    if (!best || off < best.off) best = { plan, lines, off }
+    if (off > RIDE_LENGTH_BAND && round < PLAN_ROUNDS - 1) continue
+    break
+  }
+  if (!best) return null
+
+  const { plan, lines } = best
+  const first = lines[0][0]
+  const last = lines[lines.length - 1][lines[lines.length - 1].length - 1]
+  const [outward, homeward] = await Promise.all([
+    routeThrough([start, first]),
+    routeThrough([last, start]),
+  ])
+  const route = assembleNodeRoute(outward, lines, homeward)
+
+  // The junctions as the legs place them — on the road, where the arms'
+  // centroid may not be.
+  const stops = plan.map((id, i) => ({
+    ref: net.refOf.get(id) ?? id,
+    lngLat: i < lines.length ? lines[i][0] : last,
+  }))
+  route.junctions = stopsForPlan(route.geometry.coordinates, stops)
+  return { route, plan }
+}
+
+/**
+ * Connector, legs, connector, as one route.
+ *
+ * The legs carry no elevation and no router's opinion of them, so the
+ * turn cues along them are read off their geometry, and their time is
+ * costed at the pace the router assumed for the connectors. Green is left
+ * unknown rather than guessed.
+ */
+function assembleNodeRoute(outward: Route, lines: LngLat[][], homeward: Route): Route {
+  const coords: LngLat[] = []
+  const voicehints: VoiceHint[] = []
+  const push = (p: LngLat) => {
+    const prev = coords[coords.length - 1]
+    if (!prev || !samePoint(prev, p)) coords.push(p)
+    return coords.length - 1
+  }
+  const append = (part: Route) => {
+    const indexOf = part.geometry.coordinates.map(push)
+    for (const [index, ...rest] of part.voicehints ?? []) {
+      if (indexOf[index] != null) voicehints.push([indexOf[index], ...rest])
+    }
+  }
+
+  append(outward)
+  const legsFrom = coords.length - 1
+  for (const line of lines) for (const p of line) push(p)
+  const legsTo = coords.length - 1
+  voicehints.push(...turnHintsAlong(coords, legsFrom, legsTo))
+  append(homeward)
+  voicehints.sort((a, b) => a[0] - b[0])
+
+  const legsKm = polylineKm(coords.slice(legsFrom, legsTo + 1))
+  const connectorKm = outward.distanceKm + homeward.distanceKm
+  const connectorSec = outward.durationSec + homeward.durationSec
+  const paceKmh = connectorSec > 0 && connectorKm > 0 ? (connectorKm / connectorSec) * 3600 : 16
+
+  return {
+    geometry: { type: 'LineString', coordinates: coords },
+    distanceKm: connectorKm + legsKm,
+    durationSec: connectorSec + (legsKm / paceKmh) * 3600,
+    voicehints,
+    greenFraction: null,
+    greenMask: null,
+  }
+}
+
+/**
+ * Choose the sequence. Finishing at a *different* nearby junction from the
+ * one the ride started at keeps the connector from being ridden twice — out
+ * one way, home another — and both ends count against the distance asked
+ * for. Each junction within reach is tried as the first: the nearest can sit
+ * behind you, and then the first leg comes straight back past the door — the
+ * right distance, the wrong ride. Shape is scored alongside length, so a
+ * genuine round beats an out-and-back of equal size.
+ */
+function planRide(
+  network: NodeNetwork,
+  start: LngLat,
+  targetKm: number,
+  waypoints: LngLat[],
+  random?: () => number,
+): string[] | null {
+  // How far off the first and last junction may be. Not a share of the
+  // target: a long ride does not want a long way to the first sign.
+  const reach = Math.min(Math.max(1.5, targetKm * 0.08), 3)
+  const finishes = new Set(
+    [...network.at]
+      .filter(([id, at]) => network.neighbours.get(id)?.length && distanceKm(start, at) <= reach)
+      .map(([id]) => id),
+  )
+  const entry = nearestJunction(network, start)
+  if (!entry) return null
+  finishes.add(entry)
+  // Legs bend; so does the way to the first one.
+  const connectorKm = (id: string) => distanceKm(start, network.at.get(id)!) * 1.25
+
+  const candidates = [...finishes].sort(
+    (a, b) => distanceKm(start, network.at.get(a)!) - distanceKm(start, network.at.get(b)!),
+  )
+
+  // A pin is rarely on the network, so the ride goes past it by way of the
+  // junction nearest it. Not the same as the ordinary planner, where a stop
+  // is exact — but on a knooppuntenroute the junctions are the only places
+  // the ride can be steered through.
+  const mustPass = waypoints
+    .map((w) => nearestJunction(network, w))
+    .filter((id): id is string => !!id)
+
+  let found: { plan: string[]; score: number } | null = null
+  for (const from of candidates.slice(0, 6)) {
+    const attempt = findNodeLoop(network, from, targetKm, {
+      attempts: Math.round(400 + targetKm * 15),
+      random,
+      finishes,
+      connectorKm,
+      homeAt: start,
+      mustPass,
+    })
+    if (attempt && (!found || attempt.score < found.score)) found = attempt
+  }
+  return found && found.plan.length >= 3 ? found.plan : null
 }

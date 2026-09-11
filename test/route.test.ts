@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { doublesBack, generateLoop } from '../src/domain/route'
-import { ORIGIN, offset, metresBetween, squareLoop } from './helpers'
+import { doublesBack, generateLoop, generateNodeLoop } from '../src/domain/route'
+import { buildNetwork } from '../src/domain/knooppunten'
+import { ORIGIN, offset, metresBetween, squareLoop, M_PER_DEG_LAT, M_PER_DEG_LNG } from './helpers'
 import type { LngLat } from '../src/domain/geo'
 import type { Route, RouteThrough, VoiceHint } from '../src/domain/route'
+import type { NetworkLeg, NetworkNode } from '../src/domain/knooppunten'
 
 // The domain takes the router as a plain function, so tests hand it stubs —
 // no network, no fetch mocking.
@@ -492,5 +494,203 @@ describe('spotting a there-and-back leg', () => {
     for (const at of [10, 25, 40, 55]) coords.push(coords[at], coords[at + 1])
 
     expect(doublesBack(coords)).toBe(false)
+  })
+})
+
+describe('a ride along the junction network', () => {
+  // Four junctions on a square plus a diagonal, each leg a straight line of
+  // its own ways. Real legs bend; here the leg's line and the straight line
+  // coincide, so "on the leg" can be checked against the segment between
+  // its junctions.
+  const A = offset(ORIGIN, 500, 0)
+  const B = offset(A, 3000, 0)
+  const C = offset(A, 3000, 3000)
+  const D = offset(A, 0, 3000)
+  const nodes: NetworkNode[] = [
+    { ref: '1', lngLat: A },
+    { ref: '2', lngLat: B },
+    { ref: '3', lngLat: C },
+    { ref: '4', lngLat: D },
+  ]
+  const legs: NetworkLeg[] = [
+    { a: '1', b: '2', id: 12, km: 3 },
+    { a: '2', b: '3', id: 23, km: 3 },
+    { a: '3', b: '4', id: 34, km: 3 },
+    { a: '4', b: '1', id: 41, km: 3 },
+    { a: '1', b: '3', id: 13, km: 4.3 },
+  ]
+  const ends: Record<number, [LngLat, LngLat]> = {
+    12: [A, B],
+    23: [B, C],
+    34: [C, D],
+    41: [D, A],
+    13: [A, C],
+  }
+  const legBetween = (a: string, b: string) =>
+    legs.find((l) => [l.a, l.b].sort().join() === [a, b].sort().join())!
+
+  // Each leg as OSM would hand it back: three ways, shuffled and one reversed.
+  const geometryOf = (ids: number[]) =>
+    new Map(
+      ids.map((id) => {
+        const [p, q] = ends[id]
+        const at = (f: number): LngLat => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f]
+        return [
+          id,
+          [
+            { role: '', points: [at(0.7), at(1)] },
+            { role: '', points: [at(0.3), at(0)] },
+            { role: '', points: [at(0.3), at(0.7)] },
+          ],
+        ]
+      }),
+    )
+
+  const seeded = (s = 7) => () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+
+  const distanceToSegment = (p: LngLat, [a, b]: [LngLat, LngLat]) => {
+    const ax = a[0] * M_PER_DEG_LNG
+    const ay = a[1] * M_PER_DEG_LAT
+    const bx = b[0] * M_PER_DEG_LNG
+    const by = b[1] * M_PER_DEG_LAT
+    const px = p[0] * M_PER_DEG_LNG
+    const py = p[1] * M_PER_DEG_LAT
+    const t = Math.max(
+      0,
+      Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)),
+    )
+    return Math.hypot(px - (ax + t * (bx - ax)), py - (ay + t * (by - ay)))
+  }
+
+  async function ride({
+    legGeometry = async (ids: number[]) => geometryOf(ids),
+    seed = 7,
+  } = {}) {
+    const asked: LngLat[][] = []
+    const found = await generateNodeLoop({
+      start: ORIGIN,
+      targetKm: 13,
+      network: buildNetwork(nodes, legs),
+      routeThrough: async (points) => {
+        asked.push(points)
+        return routeOf(points, 500, [[1, 5, 0, 0, 90]]) // a turn where it lands
+      },
+      legGeometry,
+      random: seeded(seed),
+    })
+    return { found, asked }
+  }
+
+  // The legs are ridden as OpenStreetMap draws them: every vertex of every
+  // leg, in riding order, one leg after the next — so the ride follows the
+  // signed paths and skips none of the junctions. The router is only asked
+  // for the two ends.
+  it('rides each leg exactly as drawn, between two routed connectors', async () => {
+    const { found, asked } = await ride()
+    expect(found).not.toBeNull()
+    const { plan, route } = found!
+    expect(plan[0]).toBe(plan[plan.length - 1])
+    expect(plan.length).toBeGreaterThanOrEqual(4)
+
+    expect(asked).toHaveLength(2)
+    expect(asked[0][0]).toEqual(ORIGIN) // doorstep to the first junction…
+    expect(asked[1][1]).toEqual(ORIGIN) // …and the last junction home
+
+    const coords = route.geometry.coordinates
+    // From the cursor on: the ride begins and ends at the same junction.
+    let cursor = 0
+    const indexOf = (p: LngLat) =>
+      coords.findIndex((c, i) => i >= cursor && metresBetween(c, p) < 0.5)
+    for (let i = 0; i < plan.length - 1; i++) {
+      const [p, q] = ends[legBetween(plan[i], plan[i + 1]).id]
+      const at = (f: number): LngLat => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f]
+      const found = [0, 0.3, 0.7, 1].map(at).map(indexOf).sort((a, b) => a - b)
+      expect(found[0]).toBeGreaterThanOrEqual(cursor)
+      // Contiguous: nothing of the router's between the leg's own vertices.
+      expect(found[3] - found[0]).toBe(3)
+      cursor = found[3]
+    }
+    // The connector home follows the last leg.
+    expect(cursor).toBeLessThan(coords.length - 1)
+  })
+
+  it('costs the ride by the legs’ own length plus the connectors', async () => {
+    const { found } = await ride()
+    const { plan, route } = found!
+    let legsKm = 0
+    for (let i = 0; i < plan.length - 1; i++) legsKm += legBetween(plan[i], plan[i + 1]).km
+    expect(route.distanceKm).toBeCloseTo(legsKm + 1, 0)
+    expect(route.durationSec).toBeGreaterThan(0)
+  })
+
+  // The square's corners are 90° turns, and nothing else would say so: no
+  // router looks at the legs.
+  it('reads the turns at the corners off the legs themselves', async () => {
+    const { found } = await ride()
+    const { route } = found!
+    const corners = route.voicehints.filter((h) => h[1] === 2 || h[1] === 5)
+    expect(corners.length).toBeGreaterThanOrEqual(2)
+    // Connector hints are re-indexed into the assembled line, in order.
+    for (let i = 1; i < route.voicehints.length; i++) {
+      expect(route.voicehints[i][0]).toBeGreaterThan(route.voicehints[i - 1][0])
+    }
+  })
+
+  it('hands back the numbers, placed along the finished line', async () => {
+    const { found } = await ride()
+    const stops = found!.route.junctions!
+    expect(stops.map((s) => s.ref)).toEqual(found!.plan)
+    for (let i = 1; i < stops.length; i++) expect(stops[i].atKm).toBeGreaterThan(stops[i - 1].atKm)
+  })
+
+  // Tags lie about length; geometry does not. A plan made on legs tagged
+  // far longer than they are gets redone once the legs have been seen.
+  it('re-plans when the fetched legs prove the tagged lengths wrong', async () => {
+    // The square's legs are really 3 km and the diagonal 4.2; tagged 3.6
+    // and 5, two sides and the diagonal look like the 13 km asked for.
+    const lying = legs.map((l) => ({ ...l, km: l.id === 13 ? 5 : 3.6 }))
+    let asks = 0
+    const found = await generateNodeLoop({
+      start: ORIGIN,
+      targetKm: 13,
+      network: buildNetwork(nodes, lying),
+      routeThrough: async (points) => routeOf(points, 500),
+      legGeometry: async (ids) => {
+        asks++
+        return geometryOf(ids)
+      },
+      random: seeded(3),
+    })
+    expect(found).not.toBeNull()
+    // Four real legs of 3 km, not three tagged ones: the length asked for.
+    expect(found!.route.distanceKm).toBeCloseTo(13, 0)
+    expect(asks).toBeGreaterThan(1)
+  })
+
+  // Data is data: a leg whose ways do not reach its junctions is struck and
+  // the ride planned again without it, rather than routed as a guess.
+  it('strikes a leg whose geometry is unusable and plans without it', async () => {
+    let asks = 0
+    const brokenLeg23 = async (ids: number[]) => {
+      asks++
+      const map = geometryOf(ids)
+      if (map.has(23)) {
+        map.set(23, [{ role: '', points: [offset(ORIGIN, 9000, 9000), offset(ORIGIN, 9500, 9000)] }])
+      }
+      return map
+    }
+    let struck = 0
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      asks = 0
+      const { found } = await ride({ legGeometry: brokenLeg23, seed })
+      expect(found).not.toBeNull()
+      const plan = found!.plan
+      for (let i = 0; i < plan.length - 1; i++) {
+        expect(legBetween(plan[i], plan[i + 1]).id).not.toBe(23)
+      }
+      if (asks > 1) struck++
+    }
+    // Some of those first plans wanted leg 23 and had to be redone.
+    expect(struck).toBeGreaterThan(0)
   })
 })

@@ -1,14 +1,18 @@
 import { reactive, watch } from 'vue'
-import { generateLoop } from '../domain/route'
+import { generateLoop, generateNodeLoop } from '../domain/route'
 import { distanceKm } from '../domain/geo'
+import { buildNetwork, inNetworkCountries } from '../domain/knooppunten'
 import { fetchRoute } from '../infra/brouter'
 import { reverseGeocode } from '../infra/nominatim'
+import { fetchCycleNetwork, fetchLegGeometry } from '../infra/knooppunten'
 import { locale } from '../i18n'
 import { nav, startNavigation } from './nav-session'
 import type { LngLat } from '../domain/geo'
 import type { Route, Profile } from '../domain/route'
+import type { NetworkNode, NodeNetwork } from '../domain/knooppunten'
 
 export type TargetType = 'distance' | 'time'
+export type KnooppuntenFallback = 'offline' | 'none' | 'ride'
 
 interface Start {
   lngLat: LngLat
@@ -40,6 +44,21 @@ interface Store {
   waypointMode: boolean
   /** A tapped spot waiting for "yes, start here" — see proposeStart. */
   startCandidate: LngLat | null
+  /** Ride the numbered junction network rather than a loop of our own shape. */
+  knooppunten: boolean
+  /**
+   * Asked for a knooppuntenroute and got an ordinary loop, and why: the
+   * network tiles could not be read, there are no junctions around here, or
+   * the network has no ride near the target. Null when the ride is real.
+   */
+  knooppuntenFallback: KnooppuntenFallback | null
+  /** Waiting on the junction tiles, the step worth naming while it lasts. */
+  knooppuntenLoading: boolean
+  /**
+   * Every junction around the start while the switch is on, one per number
+   * and place, for the map to draw in grey — the network you could take.
+   */
+  knooppuntenNodes: NetworkNode[]
 }
 
 export const SPEEDS: Record<Profile, number> = { walk: 4.8, bike: 16 } // km/h, for time → distance
@@ -157,6 +176,10 @@ export const store = reactive<Store>({
   waypoints: loadWaypoints(), // [lng, lat][] the loop must pass through
   waypointMode: false, // map taps add waypoints instead of moving the start
   startCandidate: null,
+  knooppunten: localStorage.getItem('meguri-knooppunten') === 'on',
+  knooppuntenFallback: null,
+  knooppuntenLoading: false,
+  knooppuntenNodes: [],
   bearing: Math.random() * 360,
   clockwise: Math.random() < 0.5,
 })
@@ -258,6 +281,7 @@ function inputSignature(): string {
     targetKm(),
     store.nature,
     store.waypoints,
+    knooppuntenActive(),
   ])
 }
 
@@ -331,7 +355,14 @@ function scheduleRoute(delayMs: number) {
 // speed, which is what a tap deserves.
 watch(targetKm, () => scheduleRoute(SETTLE_MS.drag))
 watch(
-  () => [store.mode, store.targetType, store.nature, store.start?.lngLat, store.waypoints],
+  () => [
+    store.mode,
+    store.targetType,
+    store.nature,
+    store.start?.lngLat,
+    store.waypoints,
+    store.knooppunten,
+  ],
   () => scheduleRoute(SETTLE_MS.tap),
   { deep: true },
 )
@@ -387,6 +418,30 @@ export function setNature(value: boolean) {
   } catch {
     /* storage blocked — the preference just won't persist */
   }
+}
+
+export function setKnooppunten(value: boolean) {
+  store.knooppunten = value
+  try {
+    localStorage.setItem('meguri-knooppunten', value ? 'on' : 'off')
+  } catch {
+    /* storage blocked — the preference just won't persist */
+  }
+}
+
+/**
+ * Whether the switch is offered at all: cycling, somewhere the network
+ * exists. Junctions are a cycling thing here — the walking networks are
+ * tagged differently and are a separate job — and outside the Low Countries
+ * and their borders the switch could only ever say "no network here".
+ */
+export function knooppuntenOffered() {
+  return store.mode === 'bike' && !!store.start && inNetworkCountries(store.start.lngLat)
+}
+
+/** Whether the next plan is a knooppuntenroute. */
+export function knooppuntenActive() {
+  return store.knooppunten && knooppuntenOffered()
 }
 
 export function targetKm(): number {
@@ -542,18 +597,38 @@ export async function generate({ shuffle = false } = {}) {
     const { mode, nature } = store
     const signal = abortController.signal
     const signature = inputSignature()
-    store.route = await generateLoop({
-      start: store.start.lngLat,
-      targetKm: targetKm(),
-      bearing: store.bearing,
-      clockwise: store.clockwise,
-      waypoints: store.waypoints,
-      // Only hunt for green if green was asked for.
-      preferGreen: nature,
-      nudgeVia: nature ? nudgeViaToGreen : undefined,
-      metresThroughBuildings: nature ? buildingMeter : undefined,
-      routeThrough: (points) => fetchRoute(points, mode, nature, signal),
-    })
+    const onNetwork = knooppuntenActive()
+
+    let route: Route | null = null
+    let fallback: KnooppuntenFallback | null = null
+    if (onNetwork) {
+      const planned = await planNodeLoop(store.start.lngLat, {
+        routeThrough: (points) => fetchRoute(points, { mode, nature, network: true, signal }),
+        signal,
+      })
+      if ('route' in planned) route = planned.route
+      else fallback = planned.fallback
+    }
+
+    // An ordinary loop instead, and the panel says why, rather than letting
+    // a loop with no numbers on it pass for a knooppuntenroute.
+    store.knooppuntenFallback = fallback
+
+    if (!route) {
+      route = await generateLoop({
+        start: store.start.lngLat,
+        targetKm: targetKm(),
+        bearing: store.bearing,
+        clockwise: store.clockwise,
+        waypoints: store.waypoints,
+        // Only hunt for green if green was asked for.
+        preferGreen: nature,
+        nudgeVia: nature ? nudgeViaToGreen : undefined,
+        metresThroughBuildings: nature ? buildingMeter : undefined,
+        routeThrough: (points) => fetchRoute(points, { mode, nature, signal }),
+      })
+    }
+    store.route = route
     // Taken from before the request, not after: a setting changed while the
     // router was thinking is a setting the route does not reflect.
     store.routeSignature = signature
@@ -565,3 +640,89 @@ export async function generate({ shuffle = false } = {}) {
     store.busy = false
   }
 }
+
+/**
+ * How far out to look for junctions.
+ *
+ * The ride's rough radius with room to spare, and capped: Overpass answers a
+ * 17 km box around Den Haag in five to twelve seconds, and the time grows
+ * with the area. A long ride needn't be a circle — a 60 km ride still fits
+ * in a 24 km box — and past what the box can hold, the search finds no ride
+ * near the target and the planner falls back to an ordinary loop, saying so.
+ */
+const NETWORK_REACH_MAX_KM = 12
+
+function networkReachKm() {
+  return Math.min((targetKm() / (2 * Math.PI)) * 1.6 + 2, NETWORK_REACH_MAX_KM)
+}
+
+/**
+ * Plan a ride along the signposted network, or say why not.
+ *
+ * The sequence comes first and the geometry second: the legs decide the
+ * shape, and routing only draws it. The caller falls back to an ordinary
+ * loop on any of the three answers that are not a ride.
+ */
+async function planNodeLoop(
+  start: LngLat,
+  { routeThrough, signal }: { routeThrough: (points: LngLat[]) => Promise<Route>; signal: AbortSignal },
+): Promise<{ route: Route } | { fallback: KnooppuntenFallback }> {
+  store.knooppuntenLoading = true
+  let network: NodeNetwork | null
+  try {
+    network = await cycleNetwork(start, signal)
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err
+    console.error('knooppunten: network tiles', err)
+    return { fallback: 'offline' }
+  } finally {
+    store.knooppuntenLoading = false
+  }
+  if (!network) return { fallback: 'none' }
+
+  try {
+    const found = await generateNodeLoop({
+      start,
+      targetKm: targetKm(),
+      network,
+      waypoints: store.waypoints,
+      routeThrough,
+      legGeometry: (ids) => fetchLegGeometry(ids, signal),
+    })
+    return found ? { route: found.route } : { fallback: 'ride' }
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err
+    // The legs' geometry or the router could not be reached. Said in the
+    // console too: a swallowed error mislabelled as "offline" cost an hour.
+    console.error('knooppunten: ride', err)
+    return { fallback: 'offline' }
+  }
+}
+
+async function cycleNetwork(start: LngLat, signal?: AbortSignal): Promise<NodeNetwork | null> {
+  const { nodes, legs } = await fetchCycleNetwork(start, networkReachKm(), signal)
+  if (!nodes.length || !legs.length) return null
+  const network = buildNetwork(nodes, legs)
+  store.knooppuntenNodes = [...network.at].map(([id, lngLat]) => ({
+    ref: network.refOf.get(id) ?? id,
+    lngLat,
+  }))
+  return network
+}
+
+// The grey junctions follow the switch and the start, not only a plan: a
+// restored route, or a switch flipped on before anything is planned, still
+// shows the network it sits in. Cleared the moment the switch goes off.
+watch(
+  () => (knooppuntenActive() ? store.start!.lngLat : null),
+  (at) => {
+    if (!at) {
+      store.knooppuntenNodes = []
+      return
+    }
+    cycleNetwork(at).catch(() => {
+      /* the planner will say so if it matters */
+    })
+  },
+  { immediate: true },
+)

@@ -1,6 +1,7 @@
 import maplibregl from 'maplibre-gl'
 import { ll } from './route-layers'
 import type { LngLat } from '../domain/geo'
+import type { NodeStop } from '../domain/knooppunten'
 
 /** The start pin and the numbered stop pins. */
 
@@ -18,6 +19,7 @@ export function createMarkers(map: maplibregl.Map) {
   let start: maplibregl.Marker | null = null
   let candidate: maplibregl.Marker | null = null
   let stops: maplibregl.Marker[] = []
+  let junctions: maplibregl.Marker[] = []
   let draggedAt = 0
 
   return {
@@ -105,6 +107,29 @@ export function createMarkers(map: maplibregl.Map) {
     clearWaypoints() {
       for (const m of stops) m.remove()
       stops = []
+    },
+
+    /**
+     * The numbered junctions a knooppuntenroute passes. Labels, not
+     * controls — you read them off the map the way you read them off the
+     * signposts — and they stay up through navigation, where they are the
+     * thing being ridden towards.
+     */
+    renderJunctions(list: NodeStop[]) {
+      this.clearJunctions()
+      for (const stop of list) {
+        const el = document.createElement('div')
+        el.className = 'knp-marker'
+        el.textContent = stop.ref
+        junctions.push(
+          new maplibregl.Marker({ element: el }).setLngLat(ll(stop.lngLat)).addTo(map),
+        )
+      }
+    },
+
+    clearJunctions() {
+      for (const m of junctions) m.remove()
+      junctions = []
     },
   }
 }

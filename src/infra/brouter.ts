@@ -12,42 +12,82 @@ const PROFILE = { walk: 'hiking-beta', bike: 'trekking' }
 // estimates switched on, so green detours beat the direct route through town.
 // They must be registered with the server, which hands back a temporary id.
 const NATURE_SOURCE = { walk: walkNatureProfile, bike: bikeNatureProfile }
-const natureIds: Partial<Record<Profile, string>> = {}
+
+/**
+ * Which uploaded profile a request wants. Two switches, four sources:
+ *
+ * - `nature` is the estimates above.
+ * - `network` is the stock profile's own `stick_to_cycleroutes`: cycle-route
+ *   ways cost 1 and everything else takes a penalty, small by default and
+ *   large when this is on. A knooppuntenroute turns it on so the stretches
+ *   between the doorstep and the first number ride the signposted paths too.
+ *
+ * With both off, the stock server profile does and nothing is uploaded.
+ */
+export interface ProfileFlags {
+  nature: boolean
+  network: boolean
+}
+
+const FLAG_SWITCHES: Record<keyof ProfileFlags, string[]> = {
+  nature: ['consider_noise', 'consider_forest', 'consider_town', 'consider_traffic'],
+  network: ['stick_to_cycleroutes'],
+}
+
+function setSwitch(source: string, name: string, on: boolean) {
+  const re = new RegExp(`^(assign\\s+${name}\\s*=\\s*)(true|false)`, 'm')
+  return source.replace(re, `$1${on}`)
+}
+
+/** The uploaded source for a mode and its switches. */
+export function profileSource(mode: Profile, { nature, network }: ProfileFlags) {
+  let source = NATURE_SOURCE[mode]
+  for (const name of FLAG_SWITCHES.nature) source = setSwitch(source, name, nature)
+  for (const name of FLAG_SWITCHES.network) source = setSwitch(source, name, network)
+  return source
+}
+
+const variantKey = (mode: Profile, { nature, network }: ProfileFlags) =>
+  `${mode}${nature ? '' : '-plain'}${network ? '-net' : ''}`
+
+const uploadedIds: Record<string, string> = {}
 
 // Bump whenever a .brf changes, so clients stop reusing the id of the
 // profile they registered from the previous version.
 const PROFILE_VERSION = 4
 
-function cacheKey(mode: Profile) {
-  return `meguri-profile-${mode}-v${PROFILE_VERSION}`
+function cacheKey(variant: string) {
+  return `meguri-profile-${variant}-v${PROFILE_VERSION}`
 }
 
-async function registerNatureProfile(mode: Profile, signal?: AbortSignal) {
+async function registerProfile(mode: Profile, flags: ProfileFlags, signal?: AbortSignal) {
   const res = await fetch(`${BROUTER}/profile`, {
     method: 'POST',
-    body: NATURE_SOURCE[mode],
+    body: profileSource(mode, flags),
     signal,
   })
   if (!res.ok) throw new Error('Profile upload failed')
   const { profileid } = await res.json()
   if (!profileid) throw new Error('Profile upload failed')
-  natureIds[mode] = profileid
+  const variant = variantKey(mode, flags)
+  uploadedIds[variant] = profileid
   try {
-    localStorage.setItem(cacheKey(mode), profileid)
+    localStorage.setItem(cacheKey(variant), profileid)
   } catch {
     /* storage blocked — the in-memory id still works this session */
   }
   return profileid
 }
 
-async function natureProfileId(mode: Profile, signal?: AbortSignal) {
-  if (natureIds[mode]) return natureIds[mode]
-  const cached = localStorage.getItem(cacheKey(mode))
+async function uploadedProfileId(mode: Profile, flags: ProfileFlags, signal?: AbortSignal) {
+  const variant = variantKey(mode, flags)
+  if (uploadedIds[variant]) return uploadedIds[variant]
+  const cached = localStorage.getItem(cacheKey(variant))
   if (cached) {
-    natureIds[mode] = cached
+    uploadedIds[variant] = cached
     return cached
   }
-  return registerNatureProfile(mode, signal)
+  return registerProfile(mode, flags, signal)
 }
 
 async function requestRoute(
@@ -157,26 +197,31 @@ export function readGreen(
   return { fraction: green / total, mask: maskOk ? mask : null }
 }
 
-const reRegistered: Partial<Record<Profile, boolean>> = {}
+const reRegistered: Record<string, boolean> = {}
+
+export interface RouteOptions extends Partial<ProfileFlags> {
+  mode: Profile
+  signal?: AbortSignal
+}
 
 /** Route through the given points with the chosen profile. */
 export async function fetchRoute(
   points: LngLat[],
-  mode: Profile,
-  nature: boolean,
-  signal?: AbortSignal,
+  { mode, nature = true, network = false, signal }: RouteOptions,
 ): Promise<Route> {
-  if (!nature) return requestRoute(points, PROFILE[mode], signal)
+  if (!nature && !network) return requestRoute(points, PROFILE[mode], signal)
 
-  const id = await natureProfileId(mode, signal)
+  const flags = { nature, network }
+  const id = await uploadedProfileId(mode, flags, signal)
   try {
     return await requestRoute(points, id, signal)
   } catch (err) {
-    if ((err as Error).name === 'AbortError' || reRegistered[mode]) throw err
+    const variant = variantKey(mode, flags)
+    if ((err as Error).name === 'AbortError' || reRegistered[variant]) throw err
     // The server drops custom profiles after a while — register again once,
     // then let any further failure surface so the caller can try new terrain.
-    reRegistered[mode] = true
-    const freshId = await registerNatureProfile(mode, signal)
+    reRegistered[variant] = true
+    const freshId = await registerProfile(mode, flags, signal)
     return requestRoute(points, freshId, signal)
   }
 }
@@ -193,5 +238,5 @@ export async function routeBetween({
   nature?: boolean
   signal?: AbortSignal
 }): Promise<Route> {
-  return fetchRoute(points, profile, nature, signal)
+  return fetchRoute(points, { mode: profile, nature, signal })
 }

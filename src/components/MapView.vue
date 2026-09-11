@@ -27,6 +27,7 @@ import { createGreenNudger } from '../map/green'
 import { createBuildingMeter } from '../map/buildings'
 import { createRouteLayers, ll } from '../map/route-layers'
 import { createMarkers } from '../map/markers'
+import { createJunctionLayer } from '../map/junctions'
 import { createPuck } from '../map/puck'
 import { createFollowCamera } from '../map/follow'
 import { locale, t } from '../i18n'
@@ -44,6 +45,7 @@ let resizeObserver: ResizeObserver | null = null
 // Built once the map exists; every one of these owns its own state.
 let styleTweaks: ReturnType<typeof createStyleTweaks>
 let layers: ReturnType<typeof createRouteLayers>
+let junctions: ReturnType<typeof createJunctionLayer>
 let markers: ReturnType<typeof createMarkers>
 let puck: ReturnType<typeof createPuck>
 let camera: ReturnType<typeof createFollowCamera>
@@ -358,6 +360,7 @@ onMounted(() => {
 
   styleTweaks = createStyleTweaks(map)
   layers = createRouteLayers(map)
+  junctions = createJunctionLayer(map)
   markers = createMarkers(map)
   puck = createPuck(map)
   camera = createFollowCamera(map, {
@@ -413,6 +416,8 @@ onMounted(() => {
     // is the call that installs the filter doing it.
     styleTweaks.setCarPoisHidden(nav.active)
     layers.add(store.mode, routeLat())
+    junctions.add('route-casing')
+    junctions.set(store.knooppuntenNodes)
 
     // A restored session is already in the store before the style finishes
     // loading, so paint it here rather than waiting for a change event.
@@ -496,6 +501,21 @@ onMounted(() => {
 
   // Locale too: the pins carry their own "tap to remove" label.
   watch([() => store.waypoints, locale], renderWaypoints, { immediate: true })
+
+  // The numbered junctions of a knooppuntenroute, wherever the route goes.
+  watch(
+    () => store.route?.junctions ?? [],
+    (list) => markers.renderJunctions(list),
+    { immediate: true },
+  )
+
+  // And, in grey, every junction around it while the switch is on.
+  watch(
+    () => store.knooppuntenNodes,
+    (list) => {
+      if (layers.ready()) junctions.set(list)
+    },
+  )
 
   watch(
     () => store.route,

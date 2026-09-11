@@ -20,6 +20,15 @@ Available in English, Dutch and Japanese. Installable as a PWA.
   avoided and traffic lights penalised.
 - **Prefer nature over city.** A toggle that pushes routes through parks,
   woods and along water instead of straight through town.
+- **Knooppunten.** In the Netherlands and Belgium, cycling loops can be built
+  on the numbered junction network: the ride is a real sequence of junctions
+  where every step is a leg the signs actually offer, and between two numbers
+  the route *is* that leg as OpenStreetMap draws it — not a router's version
+  of it. Only the stretches from your door to the first number and from the
+  last one home are routed. The sequence is shown as you plan (56 › 73 › 14 ›
+  …), as green badges on the map with every other junction around in grey,
+  along the top of the dashboard while you ride, and spoken as each junction
+  comes up; a GPX carries the numbers as waypoints.
 - **No backtracking.** Loops are scored on how much they double back on
   themselves; a slightly shorter loop beats one that retraces its own steps.
 - **Turn-by-turn navigation** with a follow camera, spoken guidance in all
@@ -48,6 +57,23 @@ and out-and-back spurs are trimmed away. If a waypoint lands somewhere
 unroutable — water, private land — the circle swings to new terrain instead of
 giving up.
 
+Junction numbers exist nowhere but OpenStreetMap. The network — every
+junction, and every leg as its two numbers and its ridden length — ships with
+the app as half-degree tiles under `public/knooppunten/`, built by
+`pnpm knooppunten` from Overpass; a leg's length is the sum of its member ways
+in one direction, since the relation's own length counts both sides of a
+split cycle path. Asking Overpass at plan time was tried and dropped: it
+allows two concurrent queries per address, and two browsers in one flat were
+enough to be answered 429. At plan time the app reads the tiles under the
+ride, finds a closed walk through adjacent junctions by randomised search on
+the legs' real lengths (no junction twice, no leg past the doorstep), fetches
+the chosen legs' geometry from the OSM API (Overpass as fallback), stitches
+each leg's ways into a line in riding direction — respecting `forward` and
+`backward` members — corrects the plan where the tagged lengths prove wrong,
+and joins the legs to two routed connectors, kept short and charged for. Turn cues along
+the legs are read off their geometry. Where the network has no ride near the
+target, an ordinary loop is planned and the panel says so, with a retry.
+
 Routing uses [BRouter](https://brouter.de). Two profiles live in
 `src/profiles/`, derived from its stock `trekking` and `hiking-beta`: they
 enable BRouter's forest, town, noise and traffic estimates, add turn
@@ -62,6 +88,7 @@ cached; bump `PROFILE_VERSION` in `src/infra/brouter.ts` when a `.brf` changes.
 | [BRouter](https://brouter.de) | routing and turn instructions |
 | [OpenFreeMap](https://openfreemap.org) | vector map tiles |
 | [Nominatim](https://nominatim.org) | place search and reverse geocoding |
+| [Overpass](https://overpass-api.de) | the numbered junction network, when asked for |
 
 All free and keyless, all built on [OpenStreetMap](https://www.openstreetmap.org)
 data. **Please note their usage policies.** They are shared community
