@@ -895,7 +895,7 @@ function onMetricsScroll() {
 }
 
 .distance {
-  font-size: 35px;
+  font-size: 40px;
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.03em;
@@ -910,8 +910,9 @@ function onMetricsScroll() {
 
 .turn-text {
   grid-area: 1 / 1;
-  /* Outdoor size: 16px was fine on a desk and gone in the sun. */
-  font-size: 19px;
+  /* Outdoor size: 16px was fine on a desk and gone in the sun, and 19px
+     was still a squint from the handlebar. */
+  font-size: 22px;
   font-weight: 650;
   opacity: 0.97;
 }
@@ -940,15 +941,15 @@ function onMetricsScroll() {
   align-items: center;
   gap: 6px;
   margin-top: 5px;
-  font-size: 16.5px;
+  font-size: 18px;
   font-weight: 600;
   opacity: 0.92;
 }
 
 .then-turn {
   flex: none;
-  width: 19px;
-  height: 19px;
+  width: 21px;
+  height: 21px;
 }
 
 .then-rise-enter-active {
@@ -978,7 +979,7 @@ function onMetricsScroll() {
 
 .headline {
   margin: 0;
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -1163,14 +1164,14 @@ function onMetricsScroll() {
 .knp-stop-num {
   display: grid;
   place-items: center;
-  min-width: 30px;
-  height: 30px;
-  padding: 0 7px;
-  border-radius: 8px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 9px;
   background: #ffffff;
   border: 2px solid #047857;
   color: #047857;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   transition: opacity 0.3s, transform 0.3s, background 0.3s, color 0.3s;
@@ -1184,16 +1185,16 @@ function onMetricsScroll() {
 
 /* The one you are riding towards: the sign, filled in. */
 .knp-stop.next .knp-stop-num {
-  min-width: 40px;
-  height: 40px;
+  min-width: 46px;
+  height: 46px;
   background: #047857;
   color: #ffffff;
-  font-size: 20px;
+  font-size: 23px;
   box-shadow: 0 4px 14px -2px rgba(4, 120, 87, 0.55);
 }
 
 .knp-stop-dist {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
