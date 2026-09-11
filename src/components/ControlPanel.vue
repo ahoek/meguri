@@ -20,6 +20,7 @@ import {
   knooppuntenActive,
 } from '../app/store'
 import { shareGpx, canShareGpx } from '../infra/gpx'
+import { printKnooppunten, printing } from '../app/print'
 import { startNavigation } from '../app/nav-session'
 import { primeSpeech } from '../app/guidance'
 import { checkForUpdates } from '../infra/pwa'
@@ -137,8 +138,8 @@ const wpHint = computed(() => {
 /** The numbers of the knooppuntenroute on screen, in riding order. */
 const junctions = computed(() => store.route?.junctions ?? [])
 
-/** The page prints as the strip of numbers; see PrintStrip.vue. */
-const printStrip = () => window.print()
+/** The page prints as a folded A4, map and strip; see app/print.ts. */
+const printStrip = () => printKnooppunten(store.route!)
 
 const stopLabel = (index: number) =>
   locale.value === 'ja' ? `${t('wpStopN')}${index + 1}` : `${t('wpStopN')} ${index + 1}`
@@ -715,7 +716,7 @@ const routeStats = computed(() => {
       </button>
       <!-- The knooppuntenstrookje: the numbers on paper, to tape to the stem
            and ride from the signs. Only a knooppuntenroute has one. -->
-      <button v-if="junctions.length" @click="printStrip">
+      <button v-if="junctions.length" :disabled="printing" @click="printStrip">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M7 8V4h10v4M5 8h14a2 2 0 0 1 2 2v6h-4v4H7v-4H3v-6a2 2 0 0 1 2-2zm2 8h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { store } from '../app/store'
+import { printImage } from '../app/print'
 import { locale, t } from '../i18n'
 import { localNumber } from '../domain/format'
 
 /**
- * The knooppuntenstrookje: the strip of numbers Dutch riders tape to the
- * stem, with the distance to each next one, so the ride can be followed
- * from the signs with the phone in the pocket. Nothing on screen; it is
- * what the page becomes when printed, and only when there is a
- * knooppuntenroute to print.
+ * A folded A4: on the right half the knooppuntenstrookje, the strip of
+ * numbers Dutch riders tape to the stem with the distance to each next one;
+ * on the left half the route on a map. Folded with the print outward the
+ * numbers are the front, and opening it is the map. Nothing on screen; it
+ * is what the page becomes when printed, and only when there is a
+ * knooppuntenroute to print. The map is rendered by app/print.ts first.
  */
 
 const junctions = computed(() => store.route?.junctions ?? [])
@@ -47,6 +49,15 @@ const today = computed(() =>
 
 <template>
   <section v-if="steps.length" class="knp-print" aria-hidden="true">
+    <div class="panel map-panel">
+      <div class="map-frame">
+        <img v-if="printImage" :src="printImage" alt="" />
+        <p v-else class="sequence">{{ steps.map((s) => s.ref).join(' › ') }}</p>
+      </div>
+      <p class="credit">Meguri · © OpenStreetMap · OpenFreeMap</p>
+    </div>
+
+    <div class="panel list-panel">
     <header>
       <h1>{{ t('knpLabel') }}</h1>
       <p class="meta">{{ total }} · {{ store.start?.label }} · {{ today }}</p>
@@ -68,6 +79,7 @@ const today = computed(() =>
     </ol>
 
     <footer>Meguri · {{ t('knpHint') }}</footer>
+    </div>
   </section>
 </template>
 
@@ -76,20 +88,64 @@ const today = computed(() =>
   display: none;
 }
 
-/* A5, the size of a map pocket: 148 mm wide, 132 mm of it inside the
-   margins, which is four cells of 33 mm. Measured: thirty-one cells and
-   the header come to about 175 of the 194 mm a side offers. */
+/* A4 landscape, folded once: two panels of half a side each, 134 mm wide
+   inside the margins and the gutter, which is four cells of 33 mm. Measured:
+   thirty-one cells and the header come to about 176 of the 194 mm a panel
+   offers; a longer ride runs on to a second sheet. */
 @page {
-  size: A5;
+  size: A4 landscape;
   margin: 8mm;
 }
 
 @media print {
   .knp-print {
-    display: block;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: 194mm;
     color: #000;
     background: #fff;
     font-family: var(--font);
+  }
+
+  .panel {
+    min-width: 0;
+    break-inside: avoid;
+  }
+
+  /* The fold: the map's panel ends on a faint dashed line, and the strip
+     starts a gutter away from it. */
+  .map-panel {
+    display: flex;
+    flex-direction: column;
+    padding-right: 4mm;
+    border-right: 0.3mm dashed #bbb;
+  }
+
+  /* The picture takes whatever height the credit leaves, no more: an image
+     sized by its own width ran a line past the panel. */
+  .map-frame {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .map-frame img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: top left;
+  }
+
+  .credit {
+    margin: 1.5mm 0 0;
+    font-size: 7.5pt;
+    color: #666;
+  }
+
+  .list-panel {
+    padding-left: 4mm;
   }
 
   h1 {
