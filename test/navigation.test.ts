@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   reconcileWithLine,
+  turnKindNear,
   prepareRoute,
   positionAtKm,
   bearingAlong,
@@ -112,7 +113,16 @@ describe('locating on the route', () => {
 })
 
 describe('maneuvers', () => {
+  // A zigzag, so the hints sit on real corners: the line turns right at
+  // vertex 1, left at 2, left at 3. Hints are checked against the line now,
+  // so a fixture that turns nowhere would lose them.
   const withHints = (hints: number[][]) =>
+    prepareRoute(
+      routeFrom([{ north: 100 }, { east: 100 }, { north: 100 }, { east: -100 }], {
+        voicehints: hints,
+      }),
+    )
+  const straightWith = (hints: number[][]) =>
     prepareRoute(
       routeFrom([{ north: 100 }, { north: 100 }, { north: 100 }, { north: 100 }], {
         voicehints: hints,
@@ -126,16 +136,16 @@ describe('maneuvers', () => {
   })
 
   it('drops a slight turn that is really just a curve', () => {
-    const gentle = withHints([[2, 6, 0, 0, 8]]) // 8° "slight right"
-    const real = withHints([[2, 6, 0, 0, 35]])
+    const gentle = straightWith([[2, 6, 0, 0, 8]]) // 8° "slight right"
+    const real = straightWith([[2, 6, 0, 0, 35]])
     expect(gentle.maneuvers).toHaveLength(0)
     expect(real.maneuvers).toHaveLength(1)
   })
 
   it('merges turns that are metres apart into one', () => {
     const p = prepareRoute(
-      routeFrom([{ north: 10 }, { north: 10 }, { north: 300 }], {
-        voicehints: [[1, 2, 0, 0, 90], [2, 5, 0, 0, 90]],
+      routeFrom([{ north: 10 }, { east: 10 }, { north: 300 }], {
+        voicehints: [[1, 5, 0, 0, 90], [2, 2, 0, 0, -90]],
       }),
     )
     expect(p.maneuvers).toHaveLength(1)
@@ -150,11 +160,11 @@ describe('maneuvers', () => {
   // A walker reads the screen at the fork and puts the phone away, so a turn
   // that lands right behind the next one has to travel with it.
   it('reports the turn after the next one, and the gap to it', () => {
-    const p = withHints([[1, 2, 0, 0, 90], [3, 5, 0, 0, 90]])
+    const p = withHints([[1, 5, 0, 0, 90], [3, 2, 0, 0, -90]])
     const first = nextManeuver(p, 0)!
     const second = maneuverAfter(p, first.atKm)!
 
-    expect(second.kind).toBe('right')
+    expect(second.kind).toBe('left')
     expect(second.gapM).toBeCloseTo((p.maneuvers[1].atKm - first.atKm) * 1000, 3)
   })
 
@@ -288,8 +298,32 @@ describe('a hint that contradicts the line', () => {
 
   it('leaves a hint alone where the line agrees, or says nothing clear', () => {
     expect(reconcileWithLine('left', corner, 1)).toBe('left')
-    const straight = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 200, 0), offset(ORIGIN, 300, 0)]
-    expect(reconcileWithLine('right', straight, 1)).toBe('right')
+    const gentle = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 200, 40), offset(ORIGIN, 300, 80)]
+    expect(reconcileWithLine('right', gentle, 1)).toBe('right') // 22°: too little to contradict
     expect(reconcileWithLine('roundabout', corner, 1)).toBe('roundabout')
+  })
+})
+
+
+describe('what the line does at a junction', () => {
+  // The square loop's corners are 90° turns; between them it runs straight.
+  const loop = squareLoop(400)
+  const p = prepareRoute(loop)
+
+  it('reads a corner off the line', () => {
+    // First corner: north then east, a right turn, 400 m in.
+    expect(turnKindNear(p, 0.4)).toBe('right')
+  })
+
+  it('says straight on where the line runs straight', () => {
+    expect(turnKindNear(p, 0.2)).toBe('continue')
+  })
+
+  // A hint saying left on a straight line is no turn: dropped rather than
+  // spoken over a map that shows none.
+  it('drops a plain turn hint where the line does not bend', () => {
+    const straight = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 200, 0), offset(ORIGIN, 300, 0)]
+    expect(reconcileWithLine('left', straight, 1)).toBe('continue')
+    expect(reconcileWithLine('keepLeft', straight, 1)).toBe('keepLeft') // a fork, not a bend
   })
 })

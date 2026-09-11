@@ -10,6 +10,8 @@ import {
   positionAtKm,
   segmentBearingAt,
   bearingAlong,
+  turnKindNear,
+  maneuverNear,
   AT_START_M,
 } from '../domain/navigation'
 import { speakJunction, speakManeuver, resetSpeech, setGuidanceProfile } from './guidance'
@@ -473,7 +475,12 @@ function onPosition(pos: GeolocationPosition) {
       offRoute: nav.offRoute,
       toFinishM,
     })
-    if (!nav.offRoute && !nav.arrived) speakJunction(junctions, alongKm, maneuver)
+    if (!nav.offRoute && !nav.arrived) {
+      speakJunction(junctions, alongKm, {
+        turnKindNear: (km) => turnKindNear(prepared!, km),
+        maneuverNear: (km) => maneuverNear(prepared!, km),
+      })
+    }
   }
 }
 

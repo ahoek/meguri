@@ -75,8 +75,10 @@ export function geometricTurn(coords: LngLat[], index: number): number | null {
 
 // A hint that says right where the line clearly turns left is the wrong
 // hint: reported from a ride, the voice said rechtsaf while the map bent
-// left. Past this the geometry is believed and the hint mirrored.
-const CONTRADICTION_DEG = 30
+// left. Past this the geometry is believed and the hint mirrored. Just
+// under the size the line itself is read as a slight turn, so the two
+// never disagree about the side.
+const CONTRADICTION_DEG = 25
 const MIRROR: Record<string, string> = {
   left: 'right',
   right: 'left',
@@ -88,14 +90,72 @@ const MIRROR: Record<string, string> = {
   keepRight: 'keepLeft',
 }
 
-/** The hint's kind, or its mirror image where the line plainly disagrees. */
+// A turn announced where the line runs straight is no turn: seen at the
+// junction a knooppunten ride's last leg hands over to the router, whose
+// first hint said left on a line that did not bend.
+const STRAIGHT_DEG = 12
+const PLAIN_TURNS = new Set(['left', 'right', 'sharpLeft', 'sharpRight'])
+
+/**
+ * The hint's kind, checked against the line: mirrored where the line
+ * plainly bends the other way, dropped where it does not bend at all.
+ */
 export function reconcileWithLine(kind: string, coords: LngLat[], index: number): string {
   const mirrored = MIRROR[kind]
   if (!mirrored) return kind
   const turn = geometricTurn(coords, index)
-  if (turn == null || Math.abs(turn) < CONTRADICTION_DEG) return kind
+  if (turn == null) return kind
+  if (PLAIN_TURNS.has(kind) && Math.abs(turn) < STRAIGHT_DEG) return 'continue'
+  if (Math.abs(turn) < CONTRADICTION_DEG) return kind
   const saysRight = kind.toLowerCase().includes('right')
   return (turn > 0) === saysRight ? kind : mirrored
+}
+
+// What the line does at a spot, in the hints' vocabulary. The same sizes
+// that read turns off a knooppunten leg.
+const KIND_SLIGHT_DEG = 28
+const KIND_PLAIN_DEG = 55
+const KIND_SHARP_DEG = 118
+
+function kindOfTurn(turn: number): string {
+  const size = Math.abs(turn)
+  if (size < KIND_SLIGHT_DEG) return 'continue'
+  const side = turn > 0 ? 'Right' : 'Left'
+  if (size >= KIND_SHARP_DEG) return `sharp${side}`
+  if (size >= KIND_PLAIN_DEG) return side.toLowerCase()
+  return `slight${side}`
+}
+
+/**
+ * What to do at a point of the route, read off the line itself: the
+ * sharpest bend within `windowKm` of it. For the junction cue on a
+ * knooppunten ride, where the cue said straight on at a corner because
+ * the hint list had nothing at the junction's own metre.
+ */
+export function turnKindNear(prepared: PreparedRoute, km: number, windowKm = 0.04): string {
+  const { coords, cumulative } = prepared
+  let sharpest = 0
+  for (let i = 1; i < coords.length - 1; i++) {
+    if (cumulative[i] < km - windowKm) continue
+    if (cumulative[i] > km + windowKm) break
+    const turn = geometricTurn(coords, i)
+    if (turn != null && Math.abs(turn) > Math.abs(sharpest)) sharpest = turn
+  }
+  return kindOfTurn(sharpest)
+}
+
+/** The manoeuvre closest to a point of the route, within `windowKm` of it. */
+export function maneuverNear(
+  prepared: PreparedRoute,
+  km: number,
+  windowKm = 0.04,
+): Maneuver | null {
+  let best: Maneuver | null = null
+  for (const m of prepared.maneuvers) {
+    const off = Math.abs(m.atKm - km)
+    if (off <= windowKm && (!best || off < Math.abs(best.atKm - km))) best = m
+  }
+  return best
 }
 
 function isGentleBend(maneuver: Maneuver) {
