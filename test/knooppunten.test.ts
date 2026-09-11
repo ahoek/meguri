@@ -3,6 +3,7 @@ import {
   buildNetwork,
   findNodeLoop,
   inNetworkCountries,
+  junctionsAlong,
   legKey,
   stitchLeg,
   stopsForPlan,
@@ -333,6 +334,17 @@ describe('placing the numbers on the finished line', () => {
     const stops = stopsForPlan(square(), [node('12', 0, 0), node('78', 1000, 1000), node('12', 0, 0)])
     expect(stops[0].atKm).toBeCloseTo(0, 1)
     expect(stops[2].atKm).toBeCloseTo(4, 1)
+  })
+})
+
+describe('junctions a connector rides through', () => {
+  it('names them in order, and only those on the line', () => {
+    const net = grid()
+    // Straight east along the bottom row, 20 m south of the junctions.
+    const line = [offset(ORIGIN, -500, -20), offset(ORIGIN, 2500, -20)]
+    const passed = junctionsAlong(line, net)
+    expect(passed.map((j) => j.id)).toEqual(['00', '01', '02'])
+    expect(passed[1].atKm).toBeCloseTo(1.5, 1)
   })
 })
 

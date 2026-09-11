@@ -678,6 +678,47 @@ export function stopsForPlan(coords: LngLat[], stops: NetworkNode[]): NodeStop[]
 }
 
 /**
+ * The junctions a line rides through, in order, with how far along.
+ *
+ * For the two connectors: a way home that runs straight through 54 has
+ * passed a sign, and a ride that does not say so is not the ride you rode.
+ * Distance is to the line, not its vertices, which sit far apart on a
+ * straight; only junctions with legs count, as elsewhere.
+ */
+// A junction's badge is the centroid of its arm nodes, which can sit fifty
+// metres off the crossing the connector actually rides through.
+const PASSED_M = 50
+
+export function junctionsAlong(
+  coords: LngLat[],
+  network: NodeNetwork,
+  toleranceM = PASSED_M,
+): { id: string; atKm: number }[] {
+  if (coords.length < 2) return []
+  const cumulative = [0]
+  for (let i = 1; i < coords.length; i++) {
+    cumulative.push(cumulative[i - 1] + distanceKm(coords[i - 1], coords[i]))
+  }
+  const limit = toleranceM / 1000
+  const out: { id: string; atKm: number }[] = []
+  for (const [id, at] of network.at) {
+    if (!network.neighbours.get(id)?.length) continue
+    let bestKm = Infinity
+    let bestAt = 0
+    for (let i = 0; i < coords.length - 1; i++) {
+      const near = closestOnSegment(coords[i], coords[i + 1], at)
+      const d = distanceKm(at, near)
+      if (d < bestKm) {
+        bestKm = d
+        bestAt = cumulative[i] + distanceKm(coords[i], near)
+      }
+    }
+    if (bestKm <= limit) out.push({ id, atKm: bestAt })
+  }
+  return out.sort((a, b) => a.atKm - b.atKm)
+}
+
+/**
  * Where numbered cycling junctions exist at all.
  *
  * The Netherlands and Belgium have the network everywhere; the German and

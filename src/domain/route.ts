@@ -1,6 +1,7 @@
 import { loopViaPoints, loopViaWithWaypoints, distanceKm } from './geo'
 import {
   findNodeLoop,
+  junctionsAlong,
   legKey,
   nearestJunction,
   stitchLeg,
@@ -603,6 +604,9 @@ const PLAN_ROUNDS = 8
 // ride came out 35 km.
 const LEG_KM_TRUST = 0.03
 const RIDE_LENGTH_BAND = 0.08
+// How many junctions a connector may be found riding through before the
+// ride stops being extended to them.
+const CONNECTOR_ROUNDS = 3
 
 /**
  * A ride along the signposted network: 32 → 33 → 34 and home.
@@ -692,21 +696,83 @@ export async function generateNodeLoop({
   }
   if (!best) return null
 
-  const { plan, lines } = best
-  const first = lines[0][0]
-  const last = lines[lines.length - 1][lines[lines.length - 1].length - 1]
-  const [outward, homeward] = await Promise.all([
-    routeThrough([start, first]),
-    routeThrough([last, start]),
+  const plan = [...best.plan]
+  const lines = [...best.lines]
+  const firstOf = () => lines[0][0]
+  const lastOf = () => lines[lines.length - 1][lines[lines.length - 1].length - 1]
+  let [outward, homeward] = await Promise.all([
+    routeThrough([start, firstOf()]),
+    routeThrough([lastOf(), start]),
   ])
+
+  // A connector that rides through a junction has passed a sign. Where that
+  // junction adjoins the ride's end, the ride is extended along the real leg
+  // and the connector re-routed from there — the way home from 46 through
+  // 54 is a ride to 54 and the way home from 54. Passed junctions that do
+  // not adjoin still get named: they are on the ride, whatever the plan said.
+  const passedBefore: string[] = []
+  const passedAfter: string[] = []
+  for (let round = 0; round < CONNECTOR_ROUNDS; round++) {
+    const seen = new Set(plan)
+    const before = junctionsAlong(outward.geometry.coordinates, net)
+      .filter((j) => !seen.has(j.id) && distanceKm(net.at.get(j.id)!, firstOf()) > 0.1)
+      .map((j) => j.id)
+    const after = junctionsAlong(homeward.geometry.coordinates, net)
+      .filter((j) => !seen.has(j.id) && distanceKm(net.at.get(j.id)!, lastOf()) > 0.1)
+      .map((j) => j.id)
+
+    const joinBefore = before.length ? before[before.length - 1] : null
+    const joinAfter = after.length ? after[0] : null
+    const legBefore = joinBefore ? net.legs.get(legKey(joinBefore, plan[0])) : undefined
+    const legAfter = joinAfter ? net.legs.get(legKey(joinAfter, plan[plan.length - 1])) : undefined
+    if (!legBefore && !legAfter) {
+      passedBefore.push(...before)
+      passedAfter.push(...after)
+      break
+    }
+
+    const ways = await legGeometry(
+      [legBefore?.id, legAfter?.id].filter((id): id is number => id != null),
+    )
+    let grew = false
+    if (legBefore && joinBefore) {
+      const line = stitchLeg(ways.get(legBefore.id) ?? [], net.at.get(joinBefore)!, firstOf())
+      if (line) {
+        plan.unshift(joinBefore)
+        lines.unshift(line)
+        outward = await routeThrough([start, firstOf()])
+        grew = true
+      }
+    }
+    if (legAfter && joinAfter) {
+      const line = stitchLeg(ways.get(legAfter.id) ?? [], lastOf(), net.at.get(joinAfter)!)
+      if (line) {
+        plan.push(joinAfter)
+        lines.push(line)
+        homeward = await routeThrough([lastOf(), start])
+        grew = true
+      }
+    }
+    if (!grew) {
+      passedBefore.push(...before)
+      passedAfter.push(...after)
+      break
+    }
+  }
+
   const route = assembleNodeRoute(outward, lines, homeward)
 
   // The junctions as the legs place them — on the road, where the arms'
-  // centroid may not be.
-  const stops = plan.map((id, i) => ({
-    ref: net.refOf.get(id) ?? id,
-    lngLat: i < lines.length ? lines[i][0] : last,
-  }))
+  // centroid may not be — with any the connectors pass at their own spot.
+  const named = (id: string) => ({ ref: net.refOf.get(id) ?? id, lngLat: net.at.get(id)! })
+  const stops = [
+    ...passedBefore.map(named),
+    ...plan.map((id, i) => ({
+      ref: net.refOf.get(id) ?? id,
+      lngLat: i < lines.length ? lines[i][0] : lastOf(),
+    })),
+    ...passedAfter.map(named),
+  ]
   route.junctions = stopsForPlan(route.geometry.coordinates, stops)
   return { route, plan }
 }
