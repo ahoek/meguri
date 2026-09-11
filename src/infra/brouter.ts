@@ -54,7 +54,7 @@ const uploadedIds: Record<string, string> = {}
 
 // Bump whenever a .brf changes, so clients stop reusing the id of the
 // profile they registered from the previous version.
-const PROFILE_VERSION = 4
+const PROFILE_VERSION = 5
 
 function cacheKey(variant: string) {
   return `meguri-profile-${variant}-v${PROFILE_VERSION}`
