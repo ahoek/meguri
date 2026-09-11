@@ -293,13 +293,24 @@ describe('a hint that contradicts the line', () => {
 
   it('mirrors a turn that says right where the line turns left', () => {
     expect(reconcileWithLine('right', corner, 1)).toBe('left')
-    expect(reconcileWithLine('slightRight', corner, 1)).toBe('slightLeft')
+    // And a "slight" on a ninety-degree corner is the map's to size.
+    expect(reconcileWithLine('slightRight', corner, 1)).toBe('left')
+  })
+
+  // The router's hint sits on the node where the ways meet; the line bends
+  // a few metres on. Seen at a junction: slight left on the hint, a right
+  // bend on the map ten metres later.
+  it('judges a hint by the bend a few metres on, not only at its own vertex', () => {
+    const line = [ORIGIN, offset(ORIGIN, 0, 100), offset(ORIGIN, 0, 108), offset(ORIGIN, 60, 160), offset(ORIGIN, 120, 212)]
+    expect(reconcileWithLine('slightLeft', line, 1)).toBe('slightRight')
   })
 
   it('leaves a hint alone where the line agrees, or says nothing clear', () => {
     expect(reconcileWithLine('left', corner, 1)).toBe('left')
     const gentle = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 200, 40), offset(ORIGIN, 300, 80)]
-    expect(reconcileWithLine('right', gentle, 1)).toBe('right') // 22°: too little to contradict
+    // 22°: too little to contradict the side, too little for a full turn.
+    expect(reconcileWithLine('right', gentle, 1)).toBe('slightRight')
+    expect(reconcileWithLine('slightRight', gentle, 1)).toBe('slightRight')
     expect(reconcileWithLine('roundabout', corner, 1)).toBe('roundabout')
   })
 })
@@ -325,5 +336,27 @@ describe('what the line does at a junction', () => {
     const straight = [ORIGIN, offset(ORIGIN, 100, 0), offset(ORIGIN, 200, 0), offset(ORIGIN, 300, 0)]
     expect(reconcileWithLine('left', straight, 1)).toBe('continue')
     expect(reconcileWithLine('keepLeft', straight, 1)).toBe('keepLeft') // a fork, not a bend
+  })
+})
+
+
+describe('junctions on the line', () => {
+  // A knooppunten ride's legs never met the router, so the hints often
+  // have nothing at a junction where the line plainly turns. The bend
+  // becomes the manoeuvre, and the banner shows what the map does.
+  it('adds a manoeuvre at a junction where the line bends and the hints are silent', () => {
+    const loop = squareLoop(400)
+    const corner = loop.geometry.coordinates.find((c) => metresBetween(c, offset(ORIGIN, 0, 400)) < 1)!
+    loop.junctions = [{ ref: '88', lngLat: corner, atKm: 0.4 }]
+    const p = prepareRoute(loop)
+    const at = nextManeuver(p, 0.3)!
+    expect(at.kind).toBe('right')
+    expect(at.atKm).toBeCloseTo(0.4, 2)
+  })
+
+  it('adds nothing where the line runs straight through the junction', () => {
+    const loop = squareLoop(400)
+    loop.junctions = [{ ref: '12', lngLat: offset(ORIGIN, 0, 200), atKm: 0.2 }]
+    expect(prepareRoute(loop).maneuvers).toHaveLength(0)
   })
 })

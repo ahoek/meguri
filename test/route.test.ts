@@ -630,9 +630,10 @@ describe('a ride along the junction network', () => {
     const { route } = found!
     const corners = route.voicehints.filter((h) => h[1] === 2 || h[1] === 5)
     expect(corners.length).toBeGreaterThanOrEqual(2)
-    // Connector hints are re-indexed into the assembled line, in order.
+    // Connector hints are re-indexed into the assembled line, in order. A
+    // leg's own corner hint may share a vertex with the connector's first.
     for (let i = 1; i < route.voicehints.length; i++) {
-      expect(route.voicehints[i][0]).toBeGreaterThan(route.voicehints[i - 1][0])
+      expect(route.voicehints[i][0]).toBeGreaterThanOrEqual(route.voicehints[i - 1][0])
     }
   })
 

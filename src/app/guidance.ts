@@ -168,10 +168,11 @@ const JUNCTION_ANNOUNCE_M = 40
  * On a knooppuntenroute the numbers are the route, so each one is called as
  * you reach it, with what to do there and the next to look for on the sign:
  * "Knooppunt 54, rechts afslaan. Volg de bordjes naar 46". What to do there
- * is read off the line itself around the junction — the map is what the
- * rider compares the voice with, and a cue that said straight on at a
+ * is what the banner shows there, folded in so it is not said twice, and
+ * failing that what the line itself does around the junction — the map is
+ * what the rider compares both with, and a cue that said straight on at a
  * corner because the hint list had nothing on that metre was worse than
- * silence. A hint that does sit there is folded in so it is not said twice.
+ * silence.
  */
 export function speakJunction(
   junctions: NodeStop[],
@@ -184,8 +185,10 @@ export function speakJunction(
   if ((here.atKm - alongKm) * 1000 > JUNCTION_ANNOUNCE_M) return
   saidJunction = index
 
-  const turn = t(`nav_${line.turnKindNear(here.atKm)}`)
+  // What the banner will show at the junction, so voice and screen agree;
+  // the line itself where the banner has nothing there.
   const folded = line.maneuverNear(here.atKm)
+  const turn = t(`nav_${folded?.kind ?? line.turnKindNear(here.atKm)}`)
   if (folded) spokenFor.set(`${folded.index}:${folded.kind}`, 0)
 
   const next = junctions[index + 1]

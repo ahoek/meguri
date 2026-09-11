@@ -607,6 +607,8 @@ const RIDE_LENGTH_BAND = 0.08
 // How many junctions a connector may be found riding through before the
 // ride stops being extended to them.
 const CONNECTOR_ROUNDS = 3
+// Router hints this close to a connector's start describe nothing real.
+const CONNECTOR_START_KM = 0.005
 
 /**
  * A ride along the signposted network: 32 → 33 → 34 and home.
@@ -794,8 +796,14 @@ function assembleNodeRoute(outward: Route, lines: LngLat[][], homeward: Route): 
     return coords.length - 1
   }
   const append = (part: Route) => {
-    const indexOf = part.geometry.coordinates.map(push)
+    const points = part.geometry.coordinates
+    const indexOf = points.map(push)
     for (const [index, ...rest] of part.voicehints ?? []) {
+      // A hint within the connector's first metres is the router turning
+      // out of nowhere: it never saw the leg it is leaving, and it measured
+      // its angle across a twenty-centimetre first segment. Seen as a
+      // "left" of 86 degrees at a junction the line runs straight through.
+      if (polylineKm(points.slice(0, index + 1)) < CONNECTOR_START_KM) continue
       if (indexOf[index] != null) voicehints.push([indexOf[index], ...rest])
     }
   }

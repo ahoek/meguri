@@ -96,25 +96,64 @@ const MIRROR: Record<string, string> = {
 const STRAIGHT_DEG = 12
 const PLAIN_TURNS = new Set(['left', 'right', 'sharpLeft', 'sharpRight'])
 
+// A hint's vertex and the bend it describes are not always the same
+// vertex: the router puts its hint on the node where the ways meet, and
+// the line bends a few metres on. So a hint is judged against the sharpest
+// bend within this much of it, not the bend at its own vertex.
+const HINT_WINDOW_KM = 0.02
+
+/** The sharpest bend within `windowKm` along the line of vertex `index`. */
+function sharpestTurnAround(coords: LngLat[], index: number, windowKm: number): number | null {
+  let sharpest: number | null = geometricTurn(coords, index)
+  const consider = (i: number) => {
+    const turn = geometricTurn(coords, i)
+    if (turn != null && (sharpest == null || Math.abs(turn) > Math.abs(sharpest))) sharpest = turn
+  }
+  for (let i = index - 1, km = 0; i >= 1; i--) {
+    km += distanceKm(coords[i], coords[i + 1])
+    if (km > windowKm) break
+    consider(i)
+  }
+  for (let i = index + 1, km = 0; i < coords.length - 1; i++) {
+    km += distanceKm(coords[i - 1], coords[i])
+    if (km > windowKm) break
+    consider(i)
+  }
+  return sharpest
+}
+
 /**
- * The hint's kind, checked against the line: mirrored where the line
- * plainly bends the other way, dropped where it does not bend at all.
+ * The hint's kind, checked against the line near it. Where the line does
+ * not bend at all a plain turn is dropped; where it bends a little a turn
+ * is at most a slight one, on the line's side if the line is clear about
+ * it; where it bends properly the line's own reading of size and side
+ * replaces the hint's, because a "slight left" on a corner the map draws
+ * at ninety degrees is the map's to call. Forks (keep left, keep right)
+ * only ever have their side checked.
  */
 export function reconcileWithLine(kind: string, coords: LngLat[], index: number): string {
   const mirrored = MIRROR[kind]
   if (!mirrored) return kind
-  const turn = geometricTurn(coords, index)
+  const turn = sharpestTurnAround(coords, index, HINT_WINDOW_KM)
   if (turn == null) return kind
-  if (PLAIN_TURNS.has(kind) && Math.abs(turn) < STRAIGHT_DEG) return 'continue'
-  if (Math.abs(turn) < CONTRADICTION_DEG) return kind
+  const size = Math.abs(turn)
+  if (PLAIN_TURNS.has(kind) && size < STRAIGHT_DEG) return 'continue'
+  const fork = kind.startsWith('keep')
+  if (!fork && size >= KIND_SLIGHT_DEG) return kindOfTurn(turn)
   const saysRight = kind.toLowerCase().includes('right')
-  return (turn > 0) === saysRight ? kind : mirrored
+  const side = size >= CONTRADICTION_DEG ? turn > 0 : saysRight
+  // A bend the line calls small is a slight turn at most, whatever the
+  // hint called it: "turn left" on a thirty-degree kink is the map's call.
+  if (PLAIN_TURNS.has(kind)) return side ? 'slightRight' : 'slightLeft'
+  return side === saysRight ? kind : mirrored
 }
 
 // What the line does at a spot, in the hints' vocabulary. The same sizes
-// that read turns off a knooppunten leg.
-const KIND_SLIGHT_DEG = 28
-const KIND_PLAIN_DEG = 55
+// that read turns off a knooppunten leg. Slight starts at thirty-five:
+// below that a bend is the road's own wiggle, and an S-bend of two
+// thirty-degree kinks was being called a turn.
+const KIND_SLIGHT_DEG = 35
+const KIND_PLAIN_DEG = 60
 const KIND_SHARP_DEG = 118
 
 function kindOfTurn(turn: number): string {
@@ -220,7 +259,43 @@ export function prepareRoute(route: Route): PreparedRoute {
       return !next || (next.atKm - m.atKm) * 1000 > 25
     })
 
-  return { coords, cumulative, totalKm, maneuvers }
+  const prepared = { coords, cumulative, totalKm, maneuvers }
+
+  // On a knooppuntenroute the junctions are where the line most often
+  // bends, and where the hints most often say nothing: the router never
+  // saw the legs. Where the line bends at a junction and no hint sits
+  // there, the bend becomes the manoeuvre, so banner and voice agree with
+  // the map.
+  for (const junction of route.junctions ?? []) {
+    if (maneuverNear(prepared, junction.atKm, JUNCTION_WINDOW_KM)) continue
+    const kind = turnKindNear(prepared, junction.atKm, JUNCTION_WINDOW_KM)
+    if (kind === 'continue') continue
+    const index = sharpestVertexNear(prepared, junction.atKm, JUNCTION_WINDOW_KM)
+    if (index == null) continue
+    maneuvers.push({ index, kind, exit: 0, angle: geometricTurn(coords, index) ?? 0, atKm: cumulative[index] })
+  }
+  maneuvers.sort((a, b) => a.atKm - b.atKm)
+
+  return prepared
+}
+
+const JUNCTION_WINDOW_KM = 0.04
+
+/** The vertex within `windowKm` of `km` where the line bends most, if it bends. */
+function sharpestVertexNear(prepared: PreparedRoute, km: number, windowKm: number): number | null {
+  const { coords, cumulative } = prepared
+  let best: number | null = null
+  let sharpest = 0
+  for (let i = 1; i < coords.length - 1; i++) {
+    if (cumulative[i] < km - windowKm) continue
+    if (cumulative[i] > km + windowKm) break
+    const turn = geometricTurn(coords, i)
+    if (turn != null && Math.abs(turn) > Math.abs(sharpest)) {
+      sharpest = turn
+      best = i
+    }
+  }
+  return best
 }
 
 /** Project a position onto the route. */

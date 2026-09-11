@@ -596,8 +596,9 @@ function walkWays(
  * signs carry the rest.
  */
 const TURN_REACH_KM = 0.012
-const TURN_SLIGHT_DEG = 28
-const TURN_PLAIN_DEG = 55
+// The same sizes navigation reads the line by; see kindOfTurn there.
+const TURN_SLIGHT_DEG = 35
+const TURN_PLAIN_DEG = 60
 const TURN_SHARP_DEG = 118
 // BRouter's command codes, as navigation reads them.
 const CMD = { slightLeft: 3, left: 2, sharpLeft: 4, slightRight: 6, right: 5, sharpRight: 7 }
@@ -609,12 +610,20 @@ function bearingDeg(a: LngLat, b: LngLat) {
 
 export function turnHintsAlong(coords: LngLat[], from: number, to: number): number[][] {
   const hints: number[][] = []
-  for (let i = from + 1; i < to; i++) {
+  // The ends included: the first and last junction are where a leg hands
+  // over to the routed connector, and the router says nothing about its
+  // own first metre. Left out, a sharp corner at the last junction had no
+  // instruction on the banner at all.
+  const first = Math.max(from, 1)
+  const last = Math.min(to, coords.length - 2)
+  for (let i = first; i <= last; i++) {
     // Reach back and forward until the bearings are taken over real distance.
     let back = i - 1
-    while (back > from && distanceKm(coords[back], coords[i]) < TURN_REACH_KM) back--
+    while (back > 0 && distanceKm(coords[back], coords[i]) < TURN_REACH_KM) back--
     let ahead = i + 1
-    while (ahead < to && distanceKm(coords[i], coords[ahead]) < TURN_REACH_KM) ahead++
+    while (ahead < coords.length - 1 && distanceKm(coords[i], coords[ahead]) < TURN_REACH_KM) {
+      ahead++
+    }
     // No room to measure over: at the ends of the stretch a bearing taken
     // across a couple of metres is noise, and noise here is a spoken turn.
     if (
