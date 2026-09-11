@@ -28,7 +28,8 @@ Available in English, Dutch and Japanese. Installable as a PWA.
   last one home are routed. The sequence is shown as you plan (56 › 73 › 14 ›
   …), as green badges on the map with every other junction around in grey,
   along the top of the dashboard while you ride, and spoken as each junction
-  comes up; a GPX carries the numbers as waypoints.
+  comes up; a GPX carries the numbers as waypoints, and Print turns the page
+  into the strip of numbers riders tape to the stem.
 - **No backtracking.** Loops are scored on how much they double back on
   themselves; a slightly shorter loop beats one that retraces its own steps.
 - **Turn-by-turn navigation** with a follow camera, spoken guidance in all

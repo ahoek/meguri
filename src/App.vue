@@ -3,6 +3,7 @@ import { onMounted, ref, watchEffect } from 'vue'
 import MapView from './components/MapView.vue'
 import ControlPanel from './components/ControlPanel.vue'
 import NavPanel from './components/NavPanel.vue'
+import PrintStrip from './components/PrintStrip.vue'
 import { store, resumeSession } from './app/store'
 import { nav } from './app/nav-session'
 import { locale, t } from './i18n'
@@ -26,6 +27,9 @@ onMounted(resumeSession)
       <div v-if="store.error" class="toast" role="alert">{{ t(store.error) }}</div>
     </Transition>
   </main>
+  <!-- What the page becomes on paper: the strip of numbers, and nothing of
+       the app around it. -->
+  <PrintStrip />
 </template>
 
 <style scoped>
@@ -33,6 +37,12 @@ onMounted(resumeSession)
   position: relative;
   height: 100%;
   overflow: hidden;
+}
+
+@media print {
+  .app {
+    display: none;
+  }
 }
 
 .toast {

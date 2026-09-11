@@ -231,3 +231,16 @@ input {
 }
 
 
+
+/* ---- paper ---- */
+/* The app is a screen; on paper only the knooppunten strip remains (see
+   PrintStrip.vue), and the page must be allowed to run on. */
+@media print {
+  html,
+  body,
+  #app {
+    height: auto;
+    overflow: visible;
+    background: #fff;
+  }
+}
