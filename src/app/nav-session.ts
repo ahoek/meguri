@@ -12,7 +12,7 @@ import {
   bearingAlong,
   AT_START_M,
 } from '../domain/navigation'
-import { speakJunction, speakManeuver, resetSpeech } from './guidance'
+import { speakJunction, speakManeuver, resetSpeech, setGuidanceProfile } from './guidance'
 import {
   startCompass,
   stopCompass,
@@ -583,6 +583,7 @@ export function startNavigation(
 
   profileMode = mode
   natureOn = nature
+  setGuidanceProfile(mode)
   junctions = route.junctions ?? []
   prepared = prepareRoute(route)
   lastIndex = 0

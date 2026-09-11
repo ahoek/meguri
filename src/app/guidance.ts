@@ -7,6 +7,7 @@ import {
   persistVoiceChoice,
 } from '../infra/speech'
 import type { Maneuver } from '../domain/navigation'
+import type { Profile } from '../domain/route'
 import type { NodeStop } from '../domain/knooppunten'
 
 /**
@@ -17,7 +18,21 @@ import type { NodeStop } from '../domain/knooppunten'
 // Announce each maneuver at most once per band. Ascending order matters:
 // we want the *smallest* band the distance still fits in, so the near
 // warnings fire as you close in rather than being swallowed by the far one.
-const THRESHOLDS = [30, 150, 400]
+//
+// Per profile: at 16 km/h thirty metres is seven seconds, and the rider
+// reported the turn arriving with the words still in the air. The bike's
+// bands sit further out so each is said with the same time in hand a
+// walker gets.
+const THRESHOLDS: Record<Profile, number[]> = {
+  walk: [30, 150, 400],
+  bike: [55, 220, 500],
+}
+let profile: Profile = 'walk'
+
+/** Which pace the announcements are timed for. */
+export function setGuidanceProfile(mode: Profile) {
+  profile = mode
+}
 const VOICE_LANG: Record<string, string> = { en: 'en-GB', nl: 'nl-NL', ja: 'ja-JP' }
 
 // Spoken units are spelled out — a synthesiser reads "90 m" as "ninety m".
@@ -78,7 +93,7 @@ function spokenDistance(metres: number) {
  * enough and the distance is dropped: at twenty metres "turn left" is the whole
  * of it.
  */
-function announce(key: string, label: string, metres: number, bands = THRESHOLDS) {
+function announce(key: string, label: string, metres: number, bands = THRESHOLDS[profile]) {
   const threshold = bands.find((limit) => metres <= limit)
   if (threshold == null) return
 
@@ -86,7 +101,7 @@ function announce(key: string, label: string, metres: number, bands = THRESHOLDS
   if (alreadySaid != null && alreadySaid <= threshold) return
   spokenFor.set(key, threshold)
 
-  if (threshold <= 30) return say(label)
+  if (threshold <= bands[0]) return say(label)
   const distance = spokenDistance(metres)
   say(
     locale.value === 'ja'
